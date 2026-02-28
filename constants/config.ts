@@ -20,10 +20,10 @@ export const ACTIVITY_TYPES = ['call', 'whatsapp', 'email', 'note', 'status_chan
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export const USERS: User[] = [
-  { id: 'josefina', name: 'Josefina', role: 'orchestrator', office: 'McAllen' },
-  { id: 'nayeli', name: 'Nayeli', role: 'producer', office: 'McAllen' },
-  { id: 'patricia', name: 'Patricia', role: 'producer', office: 'San Juan' },
-  { id: 'gagl', name: 'GAGL', role: 'manager', office: 'McAllen' },
+  { id: 'josefina', name: 'Josefina', role: 'orchestrator', office: 'McAllen', email: 'mgincometax@gmail.com' },
+  { id: 'nayeli', name: 'Nayeli', role: 'producer', office: 'McAllen', email: 'nayelicano655@gmail.com' },
+  { id: 'patricia', name: 'Patricia', role: 'producer', office: 'San Juan', email: 'patricia.mgoficinas@gmail.com' },
+  { id: 'gagl', name: 'GAGL', role: 'manager', office: 'McAllen', email: 'vitamg6512@gmail.com' },
 ];
 
 export interface User {
@@ -31,6 +31,7 @@ export interface User {
   name: string;
   role: 'orchestrator' | 'producer' | 'manager';
   office: Office;
+  email: string;
 }
 
 export interface WorkingHoursConfig {

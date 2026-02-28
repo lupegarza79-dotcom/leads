@@ -1,12 +1,65 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { Building2, Clock, AlertTriangle, Mail, MessageCircle, Users } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { Building2, Clock, AlertTriangle, Mail, MessageCircle, Users, LogOut, User } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { OFFICES, USERS, SLA_THRESHOLDS, WORKING_HOURS, NOTIFICATION_CHANNELS, FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
+import { useAuth } from '@/providers/AuthProvider';
 
 export default function SettingsScreen() {
+  const { user, appUser, signOut, signOutPending } = useAuth();
+
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await signOut();
+          } catch (e) {
+            console.log('[Settings] Sign out error:', e);
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <User size={16} color={Colors.primary} />
+          <Text style={styles.sectionTitle}>Current User</Text>
+        </View>
+        <View style={styles.userCard}>
+          <View style={styles.userAvatar}>
+            <Text style={styles.userAvatarText}>
+              {appUser?.name?.charAt(0) ?? '?'}
+            </Text>
+          </View>
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>{appUser?.name ?? 'Unknown'}</Text>
+            <Text style={styles.userEmail}>{user?.email ?? ''}</Text>
+            <Text style={styles.userRole}>{appUser?.role ?? 'user'} · {appUser?.office ?? ''}</Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          style={styles.signOutBtn}
+          onPress={handleSignOut}
+          disabled={signOutPending}
+        >
+          {signOutPending ? (
+            <ActivityIndicator color={Colors.danger} size="small" />
+          ) : (
+            <>
+              <LogOut size={16} color={Colors.danger} />
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Building2 size={16} color={Colors.primary} />
@@ -24,10 +77,10 @@ export default function SettingsScreen() {
           <Users size={16} color={Colors.primary} />
           <Text style={styles.sectionTitle}>Users</Text>
         </View>
-        {USERS.map(user => (
-          <View key={user.id} style={styles.row}>
-            <Text style={styles.rowText}>{user.name}</Text>
-            <Text style={styles.rowMeta}>{user.role} · {user.office}</Text>
+        {USERS.map(u => (
+          <View key={u.id} style={styles.row}>
+            <Text style={styles.rowText}>{u.name}</Text>
+            <Text style={styles.rowMeta}>{u.role} · {u.office}</Text>
           </View>
         ))}
       </View>
@@ -77,16 +130,16 @@ export default function SettingsScreen() {
           <Mail size={16} color={Colors.info} />
           <Text style={styles.sectionTitle}>Email Recipients</Text>
         </View>
-        {NOTIFICATION_CHANNELS.email.recipients.map(email => (
-          <View key={email} style={styles.row}>
-            <Text style={styles.rowText}>{email}</Text>
+        {NOTIFICATION_CHANNELS.email.recipients.map(emailAddr => (
+          <View key={emailAddr} style={styles.row}>
+            <Text style={styles.rowText}>{emailAddr}</Text>
           </View>
         ))}
       </View>
 
       <View style={styles.versionRow}>
         <Text style={styles.versionText}>MG Leads Engine v1.0.0</Text>
-        <Text style={styles.versionSub}>Single-tenant · MG Offices</Text>
+        <Text style={styles.versionSub}>Single-tenant · MG Offices · Supabase</Text>
       </View>
 
       <View style={styles.bottomPad} />
@@ -133,6 +186,58 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: 14,
     fontWeight: '700' as const,
+  },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    gap: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  userAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.primaryMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userAvatarText: {
+    color: Colors.primary,
+    fontSize: 18,
+    fontWeight: '800' as const,
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    color: Colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
+  userEmail: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  userRole: {
+    color: Colors.textTertiary,
+    fontSize: 12,
+    marginTop: 2,
+    textTransform: 'capitalize' as const,
+  },
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+  },
+  signOutText: {
+    color: Colors.danger,
+    fontSize: 14,
+    fontWeight: '600' as const,
   },
   row: {
     flexDirection: 'row',

@@ -1,36 +1,54 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
+import { supabase } from '@/lib/supabase';
 import type { Lead, ActivityLogEntry, FollowUpTask, LeadCreateInput, DashboardMetrics } from '@/types/leads';
 import type { PipelineStatus } from '@/constants/config';
 import { USERS, FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
 import { addBusinessDays } from '@/utils/business-hours';
 import { getLeadSLAStatus } from '@/utils/sla-engine';
-import { generateId } from '@/utils/formatters';
 
-const STORAGE_KEYS = {
-  leads: 'mg_leads',
-  activities: 'mg_activities',
-  followups: 'mg_followups',
-} as const;
+async function fetchLeads(): Promise<Lead[]> {
+  console.log('[Supabase] Fetching leads...');
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .order('created_at', { ascending: false });
 
-async function loadFromStorage<T>(key: string, fallback: T[]): Promise<T[]> {
-  try {
-    const raw = await AsyncStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch (e) {
-    console.log(`[Storage] Error loading ${key}:`, e);
-    return fallback;
+  if (error) {
+    console.log('[Supabase] Error fetching leads:', error.message);
+    throw error;
   }
+  console.log('[Supabase] Fetched', data?.length ?? 0, 'leads');
+  return (data ?? []) as Lead[];
 }
 
-async function saveToStorage<T>(key: string, data: T[]): Promise<void> {
-  try {
-    await AsyncStorage.setItem(key, JSON.stringify(data));
-  } catch (e) {
-    console.log(`[Storage] Error saving ${key}:`, e);
+async function fetchActivities(): Promise<ActivityLogEntry[]> {
+  console.log('[Supabase] Fetching activities...');
+  const { data, error } = await supabase
+    .from('activities')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.log('[Supabase] Error fetching activities:', error.message);
+    throw error;
   }
+  return (data ?? []) as ActivityLogEntry[];
+}
+
+async function fetchFollowUps(): Promise<FollowUpTask[]> {
+  console.log('[Supabase] Fetching follow-ups...');
+  const { data, error } = await supabase
+    .from('follow_ups')
+    .select('*')
+    .order('scheduled_at', { ascending: true });
+
+  if (error) {
+    console.log('[Supabase] Error fetching follow-ups:', error.message);
+    throw error;
+  }
+  return (data ?? []) as FollowUpTask[];
 }
 
 export const [LeadsProvider, useLeads] = createContextHook(() => {
@@ -41,17 +59,20 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
 
   const leadsQuery = useQuery({
     queryKey: ['leads'],
-    queryFn: () => loadFromStorage<Lead>(STORAGE_KEYS.leads, []),
+    queryFn: fetchLeads,
+    refetchInterval: 30000,
   });
 
   const activitiesQuery = useQuery({
     queryKey: ['activities'],
-    queryFn: () => loadFromStorage<ActivityLogEntry>(STORAGE_KEYS.activities, []),
+    queryFn: fetchActivities,
+    refetchInterval: 30000,
   });
 
   const followUpsQuery = useQuery({
     queryKey: ['followups'],
-    queryFn: () => loadFromStorage<FollowUpTask>(STORAGE_KEYS.followups, []),
+    queryFn: fetchFollowUps,
+    refetchInterval: 30000,
   });
 
   useEffect(() => {
@@ -66,37 +87,50 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     if (followUpsQuery.data) setFollowUps(followUpsQuery.data);
   }, [followUpsQuery.data]);
 
-  const persistLeads = useCallback(async (updated: Lead[]) => {
-    setLeads(updated);
-    await saveToStorage(STORAGE_KEYS.leads, updated);
-    queryClient.setQueryData(['leads'], updated);
-  }, [queryClient]);
+  useEffect(() => {
+    console.log('[Supabase] Setting up realtime subscriptions...');
+    const leadsChannel = supabase
+      .channel('leads-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
+        console.log('[Realtime] Leads table changed, refetching...');
+        queryClient.invalidateQueries({ queryKey: ['leads'] });
+      })
+      .subscribe();
 
-  const persistActivities = useCallback(async (updated: ActivityLogEntry[]) => {
-    setActivities(updated);
-    await saveToStorage(STORAGE_KEYS.activities, updated);
-    queryClient.setQueryData(['activities'], updated);
-  }, [queryClient]);
+    const activitiesChannel = supabase
+      .channel('activities-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, () => {
+        console.log('[Realtime] Activities table changed, refetching...');
+        queryClient.invalidateQueries({ queryKey: ['activities'] });
+      })
+      .subscribe();
 
-  const persistFollowUps = useCallback(async (updated: FollowUpTask[]) => {
-    setFollowUps(updated);
-    await saveToStorage(STORAGE_KEYS.followups, updated);
-    queryClient.setQueryData(['followups'], updated);
+    const followUpsChannel = supabase
+      .channel('followups-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'follow_ups' }, () => {
+        console.log('[Realtime] Follow-ups table changed, refetching...');
+        queryClient.invalidateQueries({ queryKey: ['followups'] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(leadsChannel);
+      supabase.removeChannel(activitiesChannel);
+      supabase.removeChannel(followUpsChannel);
+    };
   }, [queryClient]);
 
   const addLeadMutation = useMutation({
     mutationFn: async (input: LeadCreateInput) => {
       const now = new Date().toISOString();
-      const newLead: Lead = {
-        id: generateId(),
-        created_at: now,
+      const newLead = {
         full_name: input.full_name,
         phone: input.phone,
         email: input.email ?? null,
         office: input.office,
         source: input.source,
         owner: input.owner,
-        status: 'New',
+        status: 'New' as const,
         notes: input.notes ?? '',
         last_touch_at: now,
         next_followup_at: null,
@@ -107,32 +141,57 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         commission_estimate: null,
       };
 
-      const updated = [newLead, ...leads];
-      await persistLeads(updated);
+      const { data: leadData, error: leadError } = await supabase
+        .from('leads')
+        .insert(newLead)
+        .select()
+        .single();
 
-      const activity: ActivityLogEntry = {
-        id: generateId(),
-        lead_id: newLead.id,
-        created_at: now,
-        user_id: input.owner,
-        type: 'note',
-        note: `Lead created from ${input.source}`,
-      };
-      await persistActivities([activity, ...activities]);
+      if (leadError) {
+        console.log('[Supabase] Error creating lead:', leadError.message);
+        throw leadError;
+      }
 
-      console.log(`[LeadsEngine] Lead created: ${newLead.full_name} (${newLead.id})`);
-      return newLead;
+      const { error: activityError } = await supabase
+        .from('activities')
+        .insert({
+          lead_id: leadData.id,
+          user_id: input.owner,
+          type: 'note',
+          note: `Lead created from ${input.source}`,
+        });
+
+      if (activityError) {
+        console.log('[Supabase] Error creating activity:', activityError.message);
+      }
+
+      console.log(`[LeadsEngine] Lead created: ${leadData.full_name} (${leadData.id})`);
+      return leadData as Lead;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
     },
   });
 
   const updateLeadMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<Lead> }) => {
       const now = new Date().toISOString();
-      const updated = leads.map(l =>
-        l.id === id ? { ...l, ...updates, last_touch_at: now } : l,
-      );
-      await persistLeads(updated);
-      return updated.find(l => l.id === id)!;
+      const { data, error } = await supabase
+        .from('leads')
+        .update({ ...updates, last_touch_at: now })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        console.log('[Supabase] Error updating lead:', error.message);
+        throw error;
+      }
+      return data as Lead;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
     },
   });
 
@@ -142,7 +201,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       const lead = leads.find(l => l.id === id);
       if (!lead) throw new Error('Lead not found');
 
-      const updates: Partial<Lead> = { status, last_touch_at: now };
+      const updates: Record<string, unknown> = { status, last_touch_at: now };
 
       if (status === 'Quoted') {
         updates.quoted_at = now;
@@ -155,95 +214,158 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         updates.next_followup_at = null;
       }
 
-      const updatedLeads = leads.map(l => (l.id === id ? { ...l, ...updates } : l));
-      await persistLeads(updatedLeads);
+      const { data: updatedLead, error: updateError } = await supabase
+        .from('leads')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
 
-      const activity: ActivityLogEntry = {
-        id: generateId(),
-        lead_id: id,
-        created_at: now,
-        user_id: userId,
-        type: 'status_change',
-        note: `Status changed: ${lead.status} → ${status}`,
-      };
-      await persistActivities([activity, ...activities]);
+      if (updateError) {
+        console.log('[Supabase] Error changing status:', updateError.message);
+        throw updateError;
+      }
+
+      const { error: activityError } = await supabase
+        .from('activities')
+        .insert({
+          lead_id: id,
+          user_id: userId,
+          type: 'status_change',
+          note: `Status changed: ${lead.status} → ${status}`,
+        });
+
+      if (activityError) {
+        console.log('[Supabase] Error creating status activity:', activityError.message);
+      }
 
       if (status === 'Quoted') {
-        const newFollowUps: FollowUpTask[] = FOLLOW_UP_SCHEDULE_DAYS.map(days => ({
-          id: generateId(),
+        const newFollowUps = FOLLOW_UP_SCHEDULE_DAYS.map(days => ({
           lead_id: id,
           scheduled_at: addBusinessDays(new Date(), days).toISOString(),
           completed: false,
           completed_at: null,
           overdue: false,
         }));
-        await persistFollowUps([...newFollowUps, ...followUps]);
-        console.log(`[LeadsEngine] Follow-up tasks created for ${lead.full_name}: +1d, +3d, +7d`);
 
-        const firstFollowUp = newFollowUps[0];
-        if (firstFollowUp) {
-          const fUpdated = updatedLeads.map(l =>
-            l.id === id ? { ...l, next_followup_at: firstFollowUp.scheduled_at } : l,
-          );
-          await persistLeads(fUpdated);
+        const { data: insertedFollowUps, error: fuError } = await supabase
+          .from('follow_ups')
+          .insert(newFollowUps)
+          .select();
+
+        if (fuError) {
+          console.log('[Supabase] Error creating follow-ups:', fuError.message);
+        } else if (insertedFollowUps && insertedFollowUps.length > 0) {
+          const first = insertedFollowUps[0];
+          await supabase
+            .from('leads')
+            .update({ next_followup_at: first.scheduled_at })
+            .eq('id', id);
+          console.log(`[LeadsEngine] Follow-up tasks created for ${lead.full_name}: +1d, +3d, +7d`);
         }
       }
 
       if (status === 'Closed' || status === 'Lost') {
-        const cancelledFollowUps = followUps.map(f =>
-          f.lead_id === id && !f.completed ? { ...f, completed: true, completed_at: now } : f,
-        );
-        await persistFollowUps(cancelledFollowUps);
-        console.log(`[LeadsEngine] Follow-ups cancelled for ${lead.full_name} (${status})`);
+        const { error: cancelError } = await supabase
+          .from('follow_ups')
+          .update({ completed: true, completed_at: now })
+          .eq('lead_id', id)
+          .eq('completed', false);
+
+        if (cancelError) {
+          console.log('[Supabase] Error cancelling follow-ups:', cancelError.message);
+        } else {
+          console.log(`[LeadsEngine] Follow-ups cancelled for ${lead.full_name} (${status})`);
+        }
       }
 
       console.log(`[LeadsEngine] Status changed: ${lead.full_name} -> ${status}`);
-      return updatedLeads.find(l => l.id === id)!;
+      return updatedLead as Lead;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+      queryClient.invalidateQueries({ queryKey: ['followups'] });
     },
   });
 
   const addActivityMutation = useMutation({
     mutationFn: async (entry: Omit<ActivityLogEntry, 'id' | 'created_at'>) => {
       const now = new Date().toISOString();
-      const newEntry: ActivityLogEntry = {
-        ...entry,
-        id: generateId(),
-        created_at: now,
-      };
-      await persistActivities([newEntry, ...activities]);
 
-      const updatedLeads = leads.map(l =>
-        l.id === entry.lead_id ? { ...l, last_touch_at: now } : l,
-      );
-      await persistLeads(updatedLeads);
+      const { data, error } = await supabase
+        .from('activities')
+        .insert({
+          lead_id: entry.lead_id,
+          user_id: entry.user_id,
+          type: entry.type,
+          note: entry.note,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.log('[Supabase] Error adding activity:', error.message);
+        throw error;
+      }
+
+      await supabase
+        .from('leads')
+        .update({ last_touch_at: now })
+        .eq('id', entry.lead_id);
 
       console.log(`[LeadsEngine] Activity logged: ${entry.type} for lead ${entry.lead_id}`);
-      return newEntry;
+      return data as ActivityLogEntry;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
     },
   });
 
   const completeFollowUpMutation = useMutation({
     mutationFn: async (taskId: string) => {
       const now = new Date().toISOString();
-      const updated = followUps.map(f =>
-        f.id === taskId ? { ...f, completed: true, completed_at: now } : f,
-      );
-      await persistFollowUps(updated);
 
-      const task = followUps.find(f => f.id === taskId);
-      if (task) {
-        const leadFollowUps = updated
-          .filter(f => f.lead_id === task.lead_id && !f.completed)
-          .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+      const { data: completedTask, error } = await supabase
+        .from('follow_ups')
+        .update({ completed: true, completed_at: now })
+        .eq('id', taskId)
+        .select()
+        .single();
 
-        if (leadFollowUps.length > 0) {
-          const next = leadFollowUps[0];
-          const updatedLeads = leads.map(l =>
-            l.id === task.lead_id ? { ...l, next_followup_at: next.scheduled_at } : l,
-          );
-          await persistLeads(updatedLeads);
+      if (error) {
+        console.log('[Supabase] Error completing follow-up:', error.message);
+        throw error;
+      }
+
+      if (completedTask) {
+        const { data: remainingTasks } = await supabase
+          .from('follow_ups')
+          .select('*')
+          .eq('lead_id', completedTask.lead_id)
+          .eq('completed', false)
+          .order('scheduled_at', { ascending: true })
+          .limit(1);
+
+        if (remainingTasks && remainingTasks.length > 0) {
+          await supabase
+            .from('leads')
+            .update({ next_followup_at: remainingTasks[0].scheduled_at })
+            .eq('id', completedTask.lead_id);
+        } else {
+          await supabase
+            .from('leads')
+            .update({ next_followup_at: null })
+            .eq('id', completedTask.lead_id);
         }
       }
+
+      console.log(`[LeadsEngine] Follow-up completed: ${taskId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['followups'] });
     },
   });
 
@@ -283,10 +405,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     }).length;
 
     const totalLeads = leads.length;
-    const contactedIn10 = leads.filter(l => {
-      if (l.status === 'New') return false;
-      return true;
-    }).length;
+    const contactedIn10 = leads.filter(l => l.status !== 'New').length;
     const contactSpeedPercent = totalLeads > 0 ? Math.round((contactedIn10 / totalLeads) * 100) : 0;
 
     const closedLeads = leads.filter(l => l.status === 'Closed');
@@ -348,5 +467,10 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     getActivitiesForLead,
     getFollowUpsForLead,
     getLeadsByStatus,
+    refetch: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+      queryClient.invalidateQueries({ queryKey: ['followups'] });
+    },
   };
 });
