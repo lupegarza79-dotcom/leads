@@ -16,7 +16,7 @@ import { useResponsive } from '@/hooks/useResponsive';
 
 export default function PipelineScreen() {
   const router = useRouter();
-  const { followUps, getLeadsByStatus } = useLeads();
+  const { followUps, getLeadsByStatus, getUserById } = useLeads();
   const [activeColumnIndex, setActiveColumnIndex] = useState(0);
   const { width, isWide, isDesktop } = useResponsive();
 
@@ -143,6 +143,7 @@ export default function PipelineScreen() {
                       lead={lead}
                       followUps={followUps}
                       onPress={handleLeadPress}
+                      ownerName={getUserById(lead.owner_id)?.name ?? null}
                       compact
                     />
                   ))

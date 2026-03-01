@@ -8,7 +8,7 @@ export interface Lead {
   email: string | null;
   office: Office;
   source: LeadSource;
-  owner: string;
+  owner_id: string | null;
   status: PipelineStatus;
   notes: string;
   last_touch_at: string;
@@ -48,13 +48,21 @@ export interface SLAAlert {
   message: string;
 }
 
+export interface MgUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'orchestrator' | 'producer' | 'manager';
+  office: Office;
+}
+
 export interface LeadCreateInput {
   full_name: string;
   phone: string;
   email?: string;
   office: Office;
   source: LeadSource;
-  owner: string;
+  owner_id?: string | null;
   notes?: string;
   premium_amount?: number;
 }

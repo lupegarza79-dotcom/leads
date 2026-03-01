@@ -2,7 +2,6 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Phone, MessageCircle, Mail, FileText, ArrowRightLeft } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
-import { USERS } from '@/constants/config';
 import { formatRelativeTime } from '@/utils/formatters';
 import type { ActivityLogEntry } from '@/types/leads';
 
@@ -17,12 +16,12 @@ const ACTIVITY_ICONS: Record<string, { icon: React.ElementType; color: string }>
 interface ActivityItemProps {
   activity: ActivityLogEntry;
   showLeadName?: string;
+  userName?: string | null;
 }
 
-export const ActivityItem = React.memo(function ActivityItem({ activity, showLeadName }: ActivityItemProps) {
+export const ActivityItem = React.memo(function ActivityItem({ activity, showLeadName, userName }: ActivityItemProps) {
   const config = ACTIVITY_ICONS[activity.type] ?? ACTIVITY_ICONS.note;
   const IconComp = config.icon;
-  const user = USERS.find(u => u.id === activity.user_id);
 
   return (
     <View style={styles.row}>
@@ -36,7 +35,7 @@ export const ActivityItem = React.memo(function ActivityItem({ activity, showLea
         </View>
         {showLeadName && <Text style={styles.leadName}>{showLeadName}</Text>}
         <Text style={styles.note} numberOfLines={2}>{activity.note}</Text>
-        {user && <Text style={styles.user}>{user.name}</Text>}
+        {userName && <Text style={styles.user}>{userName}</Text>}
       </View>
     </View>
   );

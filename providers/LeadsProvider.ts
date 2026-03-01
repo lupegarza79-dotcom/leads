@@ -4,19 +4,19 @@ import createContextHook from '@nkzw/create-context-hook';
 import { supabase } from '@/lib/supabase';
 import type { Lead, ActivityLogEntry, FollowUpTask, LeadCreateInput, DashboardMetrics } from '@/types/leads';
 import type { PipelineStatus } from '@/constants/config';
-import { USERS, FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
+import { FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
 import { addBusinessDays } from '@/utils/business-hours';
 import { getLeadSLAStatus } from '@/utils/sla-engine';
 
 async function fetchLeads(): Promise<Lead[]> {
-  console.log('[Supabase] Fetching leads...');
+  console.log('[Supabase] Fetching mg_leads...');
   const { data, error } = await supabase
-    .from('leads')
+    .from('mg_leads')
     .select('*')
     .order('created_at', { ascending: false });
 
   if (error) {
-    console.log('[Supabase] Error fetching leads:', error.message);
+    console.log('[Supabase] Error fetching mg_leads:', error.message);
     throw error;
   }
   console.log('[Supabase] Fetched', data?.length ?? 0, 'leads');
@@ -24,31 +24,44 @@ async function fetchLeads(): Promise<Lead[]> {
 }
 
 async function fetchActivities(): Promise<ActivityLogEntry[]> {
-  console.log('[Supabase] Fetching activities...');
+  console.log('[Supabase] Fetching mg_activity_log...');
   const { data, error } = await supabase
-    .from('activities')
+    .from('mg_activity_log')
     .select('*')
     .order('created_at', { ascending: false });
 
   if (error) {
-    console.log('[Supabase] Error fetching activities:', error.message);
+    console.log('[Supabase] Error fetching mg_activity_log:', error.message);
     throw error;
   }
   return (data ?? []) as ActivityLogEntry[];
 }
 
 async function fetchFollowUps(): Promise<FollowUpTask[]> {
-  console.log('[Supabase] Fetching follow-ups...');
+  console.log('[Supabase] Fetching mg_follow_up_tasks...');
   const { data, error } = await supabase
-    .from('follow_ups')
+    .from('mg_follow_up_tasks')
     .select('*')
     .order('scheduled_at', { ascending: true });
 
   if (error) {
-    console.log('[Supabase] Error fetching follow-ups:', error.message);
+    console.log('[Supabase] Error fetching mg_follow_up_tasks:', error.message);
     throw error;
   }
   return (data ?? []) as FollowUpTask[];
+}
+
+async function fetchMgUsers(): Promise<{ id: string; name: string; role: string; office: string; email: string }[]> {
+  console.log('[Supabase] Fetching mg_users...');
+  const { data, error } = await supabase
+    .from('mg_users')
+    .select('*');
+
+  if (error) {
+    console.log('[Supabase] Error fetching mg_users:', error.message);
+    return [];
+  }
+  return data ?? [];
 }
 
 export const [LeadsProvider, useLeads] = createContextHook(() => {
@@ -75,6 +88,14 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     refetchInterval: 30000,
   });
 
+  const mgUsersQuery = useQuery({
+    queryKey: ['mg_users'],
+    queryFn: fetchMgUsers,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const mgUsers = useMemo(() => mgUsersQuery.data ?? [], [mgUsersQuery.data]);
+
   useEffect(() => {
     if (leadsQuery.data) setLeads(leadsQuery.data);
   }, [leadsQuery.data]);
@@ -88,27 +109,27 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
   }, [followUpsQuery.data]);
 
   useEffect(() => {
-    console.log('[Supabase] Setting up realtime subscriptions...');
+    console.log('[Supabase] Setting up realtime subscriptions for mg_ tables...');
     const leadsChannel = supabase
-      .channel('leads-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
-        console.log('[Realtime] Leads table changed, refetching...');
+      .channel('mg-leads-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mg_leads' }, () => {
+        console.log('[Realtime] mg_leads changed, refetching...');
         queryClient.invalidateQueries({ queryKey: ['leads'] });
       })
       .subscribe();
 
     const activitiesChannel = supabase
-      .channel('activities-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, () => {
-        console.log('[Realtime] Activities table changed, refetching...');
+      .channel('mg-activity-log-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mg_activity_log' }, () => {
+        console.log('[Realtime] mg_activity_log changed, refetching...');
         queryClient.invalidateQueries({ queryKey: ['activities'] });
       })
       .subscribe();
 
     const followUpsChannel = supabase
-      .channel('followups-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'follow_ups' }, () => {
-        console.log('[Realtime] Follow-ups table changed, refetching...');
+      .channel('mg-follow-up-tasks-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mg_follow_up_tasks' }, () => {
+        console.log('[Realtime] mg_follow_up_tasks changed, refetching...');
         queryClient.invalidateQueries({ queryKey: ['followups'] });
       })
       .subscribe();
@@ -129,7 +150,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         email: input.email ?? null,
         office: input.office,
         source: input.source,
-        owner: input.owner,
+        owner_id: input.owner_id ?? null,
         status: 'New' as const,
         notes: input.notes ?? '',
         last_touch_at: now,
@@ -142,7 +163,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       };
 
       const { data: leadData, error: leadError } = await supabase
-        .from('leads')
+        .from('mg_leads')
         .insert(newLead)
         .select()
         .single();
@@ -153,10 +174,10 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       }
 
       const { error: activityError } = await supabase
-        .from('activities')
+        .from('mg_activity_log')
         .insert({
           lead_id: leadData.id,
-          user_id: input.owner,
+          user_id: input.owner_id ?? 'system',
           type: 'note',
           note: `Lead created from ${input.source}`,
         });
@@ -178,7 +199,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<Lead> }) => {
       const now = new Date().toISOString();
       const { data, error } = await supabase
-        .from('leads')
+        .from('mg_leads')
         .update({ ...updates, last_touch_at: now })
         .eq('id', id)
         .select()
@@ -215,7 +236,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       }
 
       const { data: updatedLead, error: updateError } = await supabase
-        .from('leads')
+        .from('mg_leads')
         .update(updates)
         .eq('id', id)
         .select()
@@ -227,7 +248,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       }
 
       const { error: activityError } = await supabase
-        .from('activities')
+        .from('mg_activity_log')
         .insert({
           lead_id: id,
           user_id: userId,
@@ -249,7 +270,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         }));
 
         const { data: insertedFollowUps, error: fuError } = await supabase
-          .from('follow_ups')
+          .from('mg_follow_up_tasks')
           .insert(newFollowUps)
           .select();
 
@@ -258,7 +279,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         } else if (insertedFollowUps && insertedFollowUps.length > 0) {
           const first = insertedFollowUps[0];
           await supabase
-            .from('leads')
+            .from('mg_leads')
             .update({ next_followup_at: first.scheduled_at })
             .eq('id', id);
           console.log(`[LeadsEngine] Follow-up tasks created for ${lead.full_name}: +1d, +3d, +7d`);
@@ -267,7 +288,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
 
       if (status === 'Closed' || status === 'Lost') {
         const { error: cancelError } = await supabase
-          .from('follow_ups')
+          .from('mg_follow_up_tasks')
           .update({ completed: true, completed_at: now })
           .eq('lead_id', id)
           .eq('completed', false);
@@ -294,7 +315,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       const now = new Date().toISOString();
 
       const { data, error } = await supabase
-        .from('activities')
+        .from('mg_activity_log')
         .insert({
           lead_id: entry.lead_id,
           user_id: entry.user_id,
@@ -310,7 +331,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       }
 
       await supabase
-        .from('leads')
+        .from('mg_leads')
         .update({ last_touch_at: now })
         .eq('id', entry.lead_id);
 
@@ -328,7 +349,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       const now = new Date().toISOString();
 
       const { data: completedTask, error } = await supabase
-        .from('follow_ups')
+        .from('mg_follow_up_tasks')
         .update({ completed: true, completed_at: now })
         .eq('id', taskId)
         .select()
@@ -341,7 +362,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
 
       if (completedTask) {
         const { data: remainingTasks } = await supabase
-          .from('follow_ups')
+          .from('mg_follow_up_tasks')
           .select('*')
           .eq('lead_id', completedTask.lead_id)
           .eq('completed', false)
@@ -350,12 +371,12 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
 
         if (remainingTasks && remainingTasks.length > 0) {
           await supabase
-            .from('leads')
+            .from('mg_leads')
             .update({ next_followup_at: remainingTasks[0].scheduled_at })
             .eq('id', completedTask.lead_id);
         } else {
           await supabase
-            .from('leads')
+            .from('mg_leads')
             .update({ next_followup_at: null })
             .eq('id', completedTask.lead_id);
         }
@@ -385,6 +406,11 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     return leads.filter(l => l.status === status);
   }, [leads]);
 
+  const getUserById = useCallback((userId: string | null) => {
+    if (!userId) return null;
+    return mgUsers.find(u => u.id === userId) ?? null;
+  }, [mgUsers]);
+
   const metrics = useMemo((): DashboardMetrics => {
     const now = new Date();
     const todayStart = new Date(now);
@@ -395,7 +421,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
 
     const leadsToday = leads.filter(l => new Date(l.created_at) >= todayStart).length;
     const leadsThisWeek = leads.filter(l => new Date(l.created_at) >= weekStart).length;
-    const leadsUnassigned = leads.filter(l => !l.owner || l.owner === '').length;
+    const leadsUnassigned = leads.filter(l => !l.owner_id).length;
     const leadsNeedingContact = leads.filter(l => l.status === 'New').length;
 
     const followUpDueToday = followUps.filter(f => {
@@ -412,8 +438,9 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     const conversionPercent = totalLeads > 0 ? Math.round((closedLeads.length / totalLeads) * 100) : 0;
 
     const closedPerProducer: Record<string, number> = {};
-    USERS.filter(u => u.role === 'producer').forEach(u => {
-      closedPerProducer[u.name] = closedLeads.filter(l => l.owner === u.id).length;
+    const producers = mgUsers.filter(u => u.role === 'producer');
+    producers.forEach(u => {
+      closedPerProducer[u.name] = closedLeads.filter(l => l.owner_id === u.id).length;
     });
 
     const stuckLeads = leads.filter(l => {
@@ -447,7 +474,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       leadsClosed: closedLeads.length,
       followUpOverdue,
     };
-  }, [leads, followUps]);
+  }, [leads, followUps, mgUsers]);
 
   const isLoading = leadsQuery.isLoading || activitiesQuery.isLoading || followUpsQuery.isLoading;
 
@@ -455,6 +482,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     leads,
     activities,
     followUps,
+    mgUsers,
     metrics,
     isLoading,
     addLead: addLeadMutation.mutateAsync,
@@ -467,6 +495,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     getActivitiesForLead,
     getFollowUpsForLead,
     getLeadsByStatus,
+    getUserById,
     refetch: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
       queryClient.invalidateQueries({ queryKey: ['activities'] });

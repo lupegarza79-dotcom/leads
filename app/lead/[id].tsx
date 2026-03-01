@@ -9,7 +9,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import {
   Phone,
   Mail,
@@ -24,7 +24,7 @@ import {
   XCircle,
 } from 'lucide-react-native';
 import { Colors, StatusColors } from '@/constants/colors';
-import { PIPELINE_STATUSES, USERS, ACTIVITY_TYPES } from '@/constants/config';
+import { PIPELINE_STATUSES, ACTIVITY_TYPES } from '@/constants/config';
 import type { PipelineStatus, ActivityType } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -36,7 +36,6 @@ type Section = 'details' | 'activity' | 'followups';
 
 export default function LeadDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
   const {
     getLeadById,
     getActivitiesForLead,
@@ -45,6 +44,7 @@ export default function LeadDetailScreen() {
     addActivity,
     completeFollowUp,
     followUps: allFollowUps,
+    getUserById,
   } = useLeads();
 
   const lead = getLeadById(id ?? '');
@@ -63,16 +63,16 @@ export default function LeadDetailScreen() {
     return getLeadSLAStatus(lead, allFollowUps);
   }, [lead, allFollowUps]);
 
-  const owner = useMemo(() => USERS.find(u => u.id === lead?.owner), [lead]);
+  const owner = useMemo(() => getUserById(lead?.owner_id ?? null), [lead?.owner_id, getUserById]);
 
   const handleStatusChange = useCallback(async (status: PipelineStatus) => {
     if (!lead) return;
     setIsSubmitting(true);
     try {
-      await changeStatus({ id: lead.id, status, userId: lead.owner });
+      await changeStatus({ id: lead.id, status, userId: lead.owner_id ?? 'system' });
       setShowStatusPicker(false);
       console.log(`[LeadDetail] Status changed to ${status}`);
-    } catch (e) {
+    } catch (_err) {
       Alert.alert('Error', 'Failed to update status');
     } finally {
       setIsSubmitting(false);
@@ -85,7 +85,7 @@ export default function LeadDetailScreen() {
     try {
       await addActivity({
         lead_id: lead.id,
-        user_id: lead.owner,
+        user_id: lead.owner_id ?? 'system',
         type: activityType,
         note: activityNote.trim(),
       });
@@ -93,7 +93,7 @@ export default function LeadDetailScreen() {
       setShowActivityForm(false);
       setActiveSection('activity');
       console.log(`[LeadDetail] Activity added: ${activityType}`);
-    } catch (e) {
+    } catch (_err) {
       Alert.alert('Error', 'Failed to log activity');
     } finally {
       setIsSubmitting(false);
@@ -104,7 +104,7 @@ export default function LeadDetailScreen() {
     try {
       await completeFollowUp(taskId);
       console.log(`[LeadDetail] Follow-up completed: ${taskId}`);
-    } catch (e) {
+    } catch (_err) {
       Alert.alert('Error', 'Failed to complete follow-up');
     }
   }, [completeFollowUp]);

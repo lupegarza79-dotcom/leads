@@ -20,7 +20,7 @@ import type { Lead } from '@/types/leads';
 
 export default function LeadsScreen() {
   const router = useRouter();
-  const { leads, followUps } = useLeads();
+  const { leads, followUps, getUserById } = useLeads();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | 'All'>('All');
   const [officeFilter, setOfficeFilter] = useState<Office | 'All'>('All');
@@ -52,9 +52,14 @@ export default function LeadsScreen() {
 
   const renderItem = useCallback(({ item }: { item: Lead }) => (
     <View style={isWide ? listStyles.wideItem : undefined}>
-      <LeadCard lead={item} followUps={followUps} onPress={handlePress} />
+      <LeadCard
+        lead={item}
+        followUps={followUps}
+        onPress={handlePress}
+        ownerName={getUserById(item.owner_id)?.name ?? null}
+      />
     </View>
-  ), [followUps, handlePress, isWide]);
+  ), [followUps, handlePress, isWide, getUserById]);
 
   return (
     <View style={styles.container}>

@@ -16,16 +16,17 @@ import { useLeads } from '@/providers/LeadsProvider';
 import { MetricCard } from '@/components/MetricCard';
 import { formatCurrency } from '@/utils/formatters';
 import { isWithinBusinessHours } from '@/utils/business-hours';
-import { USERS } from '@/constants/config';
 import { useResponsive } from '@/hooks/useResponsive';
 
 type DashboardView = 'orchestrator' | 'manager';
 
 export default function DashboardScreen() {
-  const { metrics, leads } = useLeads();
+  const { metrics, leads, mgUsers } = useLeads();
   const [view, setView] = useState<DashboardView>('orchestrator');
   const isOpen = isWithinBusinessHours();
   const { isWide, isDesktop } = useResponsive();
+
+  const producers = mgUsers.filter(u => u.role === 'producer');
 
   const conversionColor = metrics.conversionPercent >= 20
     ? Colors.success
@@ -182,18 +183,24 @@ export default function DashboardScreen() {
             <View style={[styles.alertSection, isWide && styles.alertSectionWide]}>
               <Text style={styles.sectionTitle}>Closed Per Producer</Text>
               <View style={styles.alertCard}>
-                {USERS.filter(u => u.role === 'producer').map((user, i, arr) => (
-                  <React.Fragment key={user.id}>
-                    <View style={styles.alertRow}>
-                      <CheckCircle size={16} color={Colors.success} />
-                      <Text style={styles.alertText}>{user.name}</Text>
-                      <Text style={[styles.alertCount, { color: Colors.success }]}>
-                        {metrics.closedPerProducer[user.name] ?? 0}
-                      </Text>
-                    </View>
-                    {i < arr.length - 1 && <View style={styles.divider} />}
-                  </React.Fragment>
-                ))}
+                {producers.length === 0 ? (
+                  <View style={styles.alertRow}>
+                    <Text style={styles.alertText}>No producers loaded</Text>
+                  </View>
+                ) : (
+                  producers.map((user, i, arr) => (
+                    <React.Fragment key={user.id}>
+                      <View style={styles.alertRow}>
+                        <CheckCircle size={16} color={Colors.success} />
+                        <Text style={styles.alertText}>{user.name}</Text>
+                        <Text style={[styles.alertCount, { color: Colors.success }]}>
+                          {metrics.closedPerProducer[user.name] ?? 0}
+                        </Text>
+                      </View>
+                      {i < arr.length - 1 && <View style={styles.divider} />}
+                    </React.Fragment>
+                  ))
+                )}
               </View>
             </View>
 

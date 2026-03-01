@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,24 +13,26 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/colors';
-import { OFFICES, LEAD_SOURCES, USERS } from '@/constants/config';
+import { OFFICES, LEAD_SOURCES } from '@/constants/config';
 import type { Office, LeadSource } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 
 export default function AddLeadScreen() {
   const router = useRouter();
-  const { addLead, addingLead } = useLeads();
+  const { addLead, addingLead, mgUsers } = useLeads();
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [office, setOffice] = useState<Office>('McAllen');
   const [source, setSource] = useState<LeadSource>('WhatsApp');
-  const [owner, setOwner] = useState(USERS[0].id);
+  const [ownerId, setOwnerId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [premium, setPremium] = useState('');
 
-  const producers = USERS.filter(u => u.role === 'producer' || u.role === 'orchestrator');
+  const assignableUsers = useMemo(() => {
+    return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
+  }, [mgUsers]);
 
   const handleSubmit = useCallback(async () => {
     if (!fullName.trim()) {
@@ -49,7 +51,7 @@ export default function AddLeadScreen() {
         email: email.trim() || undefined,
         office,
         source,
-        owner,
+        owner_id: ownerId,
         notes: notes.trim() || undefined,
         premium_amount: premium ? parseFloat(premium) : undefined,
       });
@@ -59,7 +61,7 @@ export default function AddLeadScreen() {
       console.log('[AddLead] Error:', e);
       Alert.alert('Error', 'Failed to create lead. Please try again.');
     }
-  }, [fullName, phone, email, office, source, owner, notes, premium, addLead, router]);
+  }, [fullName, phone, email, office, source, ownerId, notes, premium, addLead, router]);
 
   return (
     <KeyboardAvoidingView
@@ -143,15 +145,21 @@ export default function AddLeadScreen() {
             </View>
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Assigned To</Text>
+            <Text style={styles.label}>Assigned To (optional)</Text>
             <View style={styles.chipRow}>
-              {producers.map(u => (
+              <TouchableOpacity
+                style={[styles.chip, ownerId === null && styles.chipActive]}
+                onPress={() => setOwnerId(null)}
+              >
+                <Text style={[styles.chipText, ownerId === null && styles.chipTextActive]}>Unassigned</Text>
+              </TouchableOpacity>
+              {assignableUsers.map(u => (
                 <TouchableOpacity
                   key={u.id}
-                  style={[styles.chip, owner === u.id && styles.chipActive]}
-                  onPress={() => setOwner(u.id)}
+                  style={[styles.chip, ownerId === u.id && styles.chipActive]}
+                  onPress={() => setOwnerId(u.id)}
                 >
-                  <Text style={[styles.chipText, owner === u.id && styles.chipTextActive]}>{u.name}</Text>
+                  <Text style={[styles.chipText, ownerId === u.id && styles.chipTextActive]}>{u.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>

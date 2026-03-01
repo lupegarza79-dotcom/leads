@@ -9,20 +9,22 @@ import type { ActivityLogEntry } from '@/types/leads';
 
 interface EnrichedActivity extends ActivityLogEntry {
   leadName: string;
+  userName: string | null;
 }
 
 export default function ActivityScreen() {
-  const { activities, leads } = useLeads();
+  const { activities, leads, getUserById } = useLeads();
 
   const enrichedActivities = useMemo((): EnrichedActivity[] => {
     return activities.map(a => ({
       ...a,
       leadName: leads.find(l => l.id === a.lead_id)?.full_name ?? 'Unknown',
+      userName: getUserById(a.user_id)?.name ?? null,
     }));
-  }, [activities, leads]);
+  }, [activities, leads, getUserById]);
 
   const renderItem = ({ item }: { item: EnrichedActivity }) => (
-    <ActivityItem activity={item} showLeadName={item.leadName} />
+    <ActivityItem activity={item} showLeadName={item.leadName} userName={item.userName} />
   );
 
   return (

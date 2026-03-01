@@ -2,7 +2,6 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Phone, Clock, AlertTriangle } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
-import { USERS } from '@/constants/config';
 import { StatusBadge } from './StatusBadge';
 import { formatRelativeTime, formatPhone } from '@/utils/formatters';
 import { getLeadSLAStatus } from '@/utils/sla-engine';
@@ -13,11 +12,11 @@ interface LeadCardProps {
   followUps: FollowUpTask[];
   onPress: (id: string) => void;
   compact?: boolean;
+  ownerName?: string | null;
 }
 
-export const LeadCard = React.memo(function LeadCard({ lead, followUps, onPress, compact }: LeadCardProps) {
+export const LeadCard = React.memo(function LeadCard({ lead, followUps, onPress, compact, ownerName }: LeadCardProps) {
   const slaStatus = getLeadSLAStatus(lead, followUps);
-  const owner = USERS.find(u => u.id === lead.owner);
 
   const borderColor = slaStatus === 'escalated'
     ? Colors.danger
@@ -52,7 +51,8 @@ export const LeadCard = React.memo(function LeadCard({ lead, followUps, onPress,
       <View style={styles.footer}>
         <StatusBadge status={lead.status} size="small" />
         <View style={styles.meta}>
-          {owner && <Text style={styles.ownerText}>{owner.name}</Text>}
+          {ownerName && <Text style={styles.ownerText}>{ownerName}</Text>}
+          {!ownerName && !lead.owner_id && <Text style={styles.unassignedText}>Unassigned</Text>}
           <View style={styles.timeRow}>
             <Clock size={10} color={Colors.textTertiary} />
             <Text style={styles.timeText}>{formatRelativeTime(lead.created_at)}</Text>
@@ -111,6 +111,11 @@ const styles = StyleSheet.create({
   },
   ownerText: {
     color: Colors.textTertiary,
+    fontSize: 11,
+    fontWeight: '500' as const,
+  },
+  unassignedText: {
+    color: Colors.warning,
     fontSize: 11,
     fontWeight: '500' as const,
   },
