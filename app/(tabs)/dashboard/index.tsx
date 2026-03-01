@@ -17,6 +17,7 @@ import { MetricCard } from '@/components/MetricCard';
 import { formatCurrency } from '@/utils/formatters';
 import { isWithinBusinessHours } from '@/utils/business-hours';
 import { USERS } from '@/constants/config';
+import { useResponsive } from '@/hooks/useResponsive';
 
 type DashboardView = 'orchestrator' | 'manager';
 
@@ -24,6 +25,7 @@ export default function DashboardScreen() {
   const { metrics, leads } = useLeads();
   const [view, setView] = useState<DashboardView>('orchestrator');
   const isOpen = isWithinBusinessHours();
+  const { isWide, isDesktop } = useResponsive();
 
   const conversionColor = metrics.conversionPercent >= 20
     ? Colors.success
@@ -33,35 +35,37 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.statusBar}>
-        <View style={[styles.statusDot, { backgroundColor: isOpen ? Colors.success : Colors.textTertiary }]} />
-        <Text style={styles.statusText}>
-          {isOpen ? 'Office Hours — Active' : 'After Hours — Queued'}
-        </Text>
-      </View>
+      <View style={[styles.topBar, isWide && styles.topBarWide]}>
+        <View style={styles.statusBar}>
+          <View style={[styles.statusDot, { backgroundColor: isOpen ? Colors.success : Colors.textTertiary }]} />
+          <Text style={styles.statusText}>
+            {isOpen ? 'Office Hours — Active' : 'After Hours — Queued'}
+          </Text>
+        </View>
 
-      <View style={styles.viewToggle}>
-        <TouchableOpacity
-          style={[styles.toggleBtn, view === 'orchestrator' && styles.toggleBtnActive]}
-          onPress={() => setView('orchestrator')}
-        >
-          <Text style={[styles.toggleText, view === 'orchestrator' && styles.toggleTextActive]}>
-            Orchestrator
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toggleBtn, view === 'manager' && styles.toggleBtnActive]}
-          onPress={() => setView('manager')}
-        >
-          <Text style={[styles.toggleText, view === 'manager' && styles.toggleTextActive]}>
-            Manager
-          </Text>
-        </TouchableOpacity>
+        <View style={[styles.viewToggle, isWide && styles.viewToggleWide]}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, view === 'orchestrator' && styles.toggleBtnActive]}
+            onPress={() => setView('orchestrator')}
+          >
+            <Text style={[styles.toggleText, view === 'orchestrator' && styles.toggleTextActive]}>
+              Orchestrator
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, view === 'manager' && styles.toggleBtnActive]}
+            onPress={() => setView('manager')}
+          >
+            <Text style={[styles.toggleText, view === 'manager' && styles.toggleTextActive]}>
+              Manager
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {view === 'orchestrator' ? (
-        <View style={styles.metricsGrid}>
-          <View style={styles.row}>
+        <View style={[styles.metricsGrid, isWide && styles.metricsGridWide]}>
+          <View style={[styles.row, isDesktop && styles.rowDesktop]}>
             <MetricCard
               label="New Today"
               value={metrics.leadsToday}
@@ -74,8 +78,6 @@ export default function DashboardScreen() {
               color={metrics.leadsUnassigned > 0 ? Colors.warning : Colors.success}
               icon={<Users size={14} color={metrics.leadsUnassigned > 0 ? Colors.warning : Colors.success} />}
             />
-          </View>
-          <View style={styles.row}>
             <MetricCard
               label="Need Contact"
               value={metrics.leadsNeedingContact}
@@ -90,38 +92,63 @@ export default function DashboardScreen() {
             />
           </View>
 
-          <View style={styles.alertSection}>
-            <Text style={styles.sectionTitle}>Quick Status</Text>
-            <View style={styles.alertCard}>
-              <View style={styles.alertRow}>
-                <AlertTriangle size={16} color={Colors.danger} />
-                <Text style={styles.alertText}>Stuck Leads</Text>
-                <Text style={[styles.alertCount, { color: metrics.stuckLeads > 0 ? Colors.danger : Colors.success }]}>
-                  {metrics.stuckLeads}
-                </Text>
+          <View style={[styles.cardsRow, isWide && styles.cardsRowWide]}>
+            <View style={[styles.alertSection, isWide && styles.alertSectionWide]}>
+              <Text style={styles.sectionTitle}>Quick Status</Text>
+              <View style={styles.alertCard}>
+                <View style={styles.alertRow}>
+                  <AlertTriangle size={16} color={Colors.danger} />
+                  <Text style={styles.alertText}>Stuck Leads</Text>
+                  <Text style={[styles.alertCount, { color: metrics.stuckLeads > 0 ? Colors.danger : Colors.success }]}>
+                    {metrics.stuckLeads}
+                  </Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.alertRow}>
+                  <Clock size={16} color={Colors.warning} />
+                  <Text style={styles.alertText}>Overdue Follow-ups</Text>
+                  <Text style={[styles.alertCount, { color: metrics.followUpOverdue > 0 ? Colors.warning : Colors.success }]}>
+                    {metrics.followUpOverdue}
+                  </Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.alertRow}>
+                  <Target size={16} color={Colors.info} />
+                  <Text style={styles.alertText}>Leads at Risk</Text>
+                  <Text style={[styles.alertCount, { color: metrics.leadsAtRisk > 0 ? Colors.warning : Colors.success }]}>
+                    {metrics.leadsAtRisk}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.divider} />
-              <View style={styles.alertRow}>
-                <Clock size={16} color={Colors.warning} />
-                <Text style={styles.alertText}>Overdue Follow-ups</Text>
-                <Text style={[styles.alertCount, { color: metrics.followUpOverdue > 0 ? Colors.warning : Colors.success }]}>
-                  {metrics.followUpOverdue}
-                </Text>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.alertRow}>
-                <Target size={16} color={Colors.info} />
-                <Text style={styles.alertText}>Leads at Risk</Text>
-                <Text style={[styles.alertCount, { color: metrics.leadsAtRisk > 0 ? Colors.warning : Colors.success }]}>
-                  {metrics.leadsAtRisk}
-                </Text>
+            </View>
+
+            <View style={[styles.alertSection, isWide && styles.alertSectionWide]}>
+              <Text style={styles.sectionTitle}>Conversion Funnel</Text>
+              <View style={styles.alertCard}>
+                <View style={styles.alertRow}>
+                  <TrendingUp size={16} color={Colors.primary} />
+                  <Text style={styles.alertText}>Total Leads</Text>
+                  <Text style={[styles.alertCount, { color: Colors.primary }]}>{leads.length}</Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.alertRow}>
+                  <Target size={16} color={conversionColor} />
+                  <Text style={styles.alertText}>Conversion Rate</Text>
+                  <Text style={[styles.alertCount, { color: conversionColor }]}>{metrics.conversionPercent}%</Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.alertRow}>
+                  <Zap size={16} color={Colors.cyan} />
+                  <Text style={styles.alertText}>Contact Speed</Text>
+                  <Text style={[styles.alertCount, { color: Colors.cyan }]}>{metrics.contactSpeedPercent}%</Text>
+                </View>
               </View>
             </View>
           </View>
         </View>
       ) : (
-        <View style={styles.metricsGrid}>
-          <View style={styles.row}>
+        <View style={[styles.metricsGrid, isWide && styles.metricsGridWide]}>
+          <View style={[styles.row, isDesktop && styles.rowDesktop]}>
             <MetricCard
               label="Today"
               value={metrics.leadsToday}
@@ -136,8 +163,6 @@ export default function DashboardScreen() {
               color={conversionColor}
               icon={<Target size={14} color={conversionColor} />}
             />
-          </View>
-          <View style={styles.row}>
             <MetricCard
               label="Contact Speed"
               value={`${metrics.contactSpeedPercent}%`}
@@ -153,45 +178,47 @@ export default function DashboardScreen() {
             />
           </View>
 
-          <View style={styles.alertSection}>
-            <Text style={styles.sectionTitle}>Closed Per Producer</Text>
-            <View style={styles.alertCard}>
-              {USERS.filter(u => u.role === 'producer').map((user, i, arr) => (
-                <React.Fragment key={user.id}>
-                  <View style={styles.alertRow}>
-                    <CheckCircle size={16} color={Colors.success} />
-                    <Text style={styles.alertText}>{user.name}</Text>
-                    <Text style={[styles.alertCount, { color: Colors.success }]}>
-                      {metrics.closedPerProducer[user.name] ?? 0}
-                    </Text>
-                  </View>
-                  {i < arr.length - 1 && <View style={styles.divider} />}
-                </React.Fragment>
-              ))}
+          <View style={[styles.cardsRow, isWide && styles.cardsRowWide]}>
+            <View style={[styles.alertSection, isWide && styles.alertSectionWide]}>
+              <Text style={styles.sectionTitle}>Closed Per Producer</Text>
+              <View style={styles.alertCard}>
+                {USERS.filter(u => u.role === 'producer').map((user, i, arr) => (
+                  <React.Fragment key={user.id}>
+                    <View style={styles.alertRow}>
+                      <CheckCircle size={16} color={Colors.success} />
+                      <Text style={styles.alertText}>{user.name}</Text>
+                      <Text style={[styles.alertCount, { color: Colors.success }]}>
+                        {metrics.closedPerProducer[user.name] ?? 0}
+                      </Text>
+                    </View>
+                    {i < arr.length - 1 && <View style={styles.divider} />}
+                  </React.Fragment>
+                ))}
+              </View>
             </View>
-          </View>
 
-          <View style={styles.alertSection}>
-            <Text style={styles.sectionTitle}>Pipeline Health</Text>
-            <View style={styles.alertCard}>
-              <View style={styles.alertRow}>
-                <AlertTriangle size={16} color={Colors.danger} />
-                <Text style={styles.alertText}>Stuck Leads</Text>
-                <Text style={[styles.alertCount, { color: metrics.stuckLeads > 0 ? Colors.danger : Colors.success }]}>
-                  {metrics.stuckLeads}
-                </Text>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.alertRow}>
-                <Users size={16} color={Colors.primary} />
-                <Text style={styles.alertText}>Total Leads</Text>
-                <Text style={[styles.alertCount, { color: Colors.primary }]}>{leads.length}</Text>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.alertRow}>
-                <CheckCircle size={16} color={Colors.success} />
-                <Text style={styles.alertText}>Closed</Text>
-                <Text style={[styles.alertCount, { color: Colors.success }]}>{metrics.leadsClosed}</Text>
+            <View style={[styles.alertSection, isWide && styles.alertSectionWide]}>
+              <Text style={styles.sectionTitle}>Pipeline Health</Text>
+              <View style={styles.alertCard}>
+                <View style={styles.alertRow}>
+                  <AlertTriangle size={16} color={Colors.danger} />
+                  <Text style={styles.alertText}>Stuck Leads</Text>
+                  <Text style={[styles.alertCount, { color: metrics.stuckLeads > 0 ? Colors.danger : Colors.success }]}>
+                    {metrics.stuckLeads}
+                  </Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.alertRow}>
+                  <Users size={16} color={Colors.primary} />
+                  <Text style={styles.alertText}>Total Leads</Text>
+                  <Text style={[styles.alertCount, { color: Colors.primary }]}>{leads.length}</Text>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.alertRow}>
+                  <CheckCircle size={16} color={Colors.success} />
+                  <Text style={styles.alertText}>Closed</Text>
+                  <Text style={[styles.alertCount, { color: Colors.success }]}>{metrics.leadsClosed}</Text>
+                </View>
               </View>
             </View>
           </View>
@@ -208,11 +235,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  topBar: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  topBarWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+  },
   statusBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
     gap: 8,
   },
   statusDot: {
@@ -227,13 +262,16 @@ const styles = StyleSheet.create({
   },
   viewToggle: {
     flexDirection: 'row',
-    marginHorizontal: 20,
     marginTop: 16,
     backgroundColor: Colors.surface,
     borderRadius: 10,
     padding: 3,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  viewToggleWide: {
+    marginTop: 0,
+    maxWidth: 280,
   },
   toggleBtn: {
     flex: 1,
@@ -257,12 +295,30 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     gap: 12,
   },
+  metricsGridWide: {
+    paddingHorizontal: 24,
+  },
   row: {
+    flexDirection: 'row',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  rowDesktop: {
+    flexWrap: 'nowrap',
+  },
+  cardsRow: {
+    gap: 12,
+  },
+  cardsRowWide: {
     flexDirection: 'row',
     gap: 12,
   },
   alertSection: {
     marginTop: 8,
+  },
+  alertSectionWide: {
+    flex: 1,
+    marginTop: 0,
   },
   sectionTitle: {
     color: Colors.textSecondary,

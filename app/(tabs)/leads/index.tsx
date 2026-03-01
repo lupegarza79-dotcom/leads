@@ -15,6 +15,7 @@ import type { PipelineStatus, Office } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { LeadCard } from '@/components/LeadCard';
 import { EmptyState } from '@/components/EmptyState';
+import { useResponsive } from '@/hooks/useResponsive';
 import type { Lead } from '@/types/leads';
 
 export default function LeadsScreen() {
@@ -24,6 +25,7 @@ export default function LeadsScreen() {
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | 'All'>('All');
   const [officeFilter, setOfficeFilter] = useState<Office | 'All'>('All');
   const [showFilters, setShowFilters] = useState(false);
+  const { isWide } = useResponsive();
 
   const filtered = useMemo(() => {
     let result = leads;
@@ -49,13 +51,15 @@ export default function LeadsScreen() {
   }, [router]);
 
   const renderItem = useCallback(({ item }: { item: Lead }) => (
-    <LeadCard lead={item} followUps={followUps} onPress={handlePress} />
-  ), [followUps, handlePress]);
+    <View style={isWide ? listStyles.wideItem : undefined}>
+      <LeadCard lead={item} followUps={followUps} onPress={handlePress} />
+    </View>
+  ), [followUps, handlePress, isWide]);
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchRow}>
-        <View style={styles.searchBar}>
+      <View style={[styles.searchRow, isWide && styles.searchRowWide]}>
+        <View style={[styles.searchBar, isWide && styles.searchBarWide]}>
           <Search size={16} color={Colors.textTertiary} />
           <TextInput
             style={styles.searchInput}
@@ -77,22 +81,35 @@ export default function LeadsScreen() {
         >
           <Filter size={18} color={showFilters ? Colors.primary : Colors.textSecondary} />
         </TouchableOpacity>
+        {isWide && (
+          <TouchableOpacity
+            style={styles.addBtnInline}
+            onPress={() => router.push('/add-lead')}
+          >
+            <Plus size={16} color={Colors.white} />
+            <Text style={styles.addBtnText}>New Lead</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {showFilters && (
-        <View style={styles.filterSection}>
-          <Text style={styles.filterLabel}>Status</Text>
-          <ScrollableChips
-            items={['All', ...PIPELINE_STATUSES]}
-            selected={statusFilter}
-            onSelect={(v) => setStatusFilter(v as PipelineStatus | 'All')}
-          />
-          <Text style={[styles.filterLabel, { marginTop: 10 }]}>Office</Text>
-          <ScrollableChips
-            items={['All', ...OFFICES]}
-            selected={officeFilter}
-            onSelect={(v) => setOfficeFilter(v as Office | 'All')}
-          />
+        <View style={[styles.filterSection, isWide && styles.filterSectionWide]}>
+          <View style={isWide ? styles.filterGroupWide : undefined}>
+            <Text style={styles.filterLabel}>Status</Text>
+            <ScrollableChips
+              items={['All', ...PIPELINE_STATUSES]}
+              selected={statusFilter}
+              onSelect={(v) => setStatusFilter(v as PipelineStatus | 'All')}
+            />
+          </View>
+          <View style={isWide ? styles.filterGroupWide : undefined}>
+            <Text style={[styles.filterLabel, !isWide && { marginTop: 10 }]}>Office</Text>
+            <ScrollableChips
+              items={['All', ...OFFICES]}
+              selected={officeFilter}
+              onSelect={(v) => setOfficeFilter(v as Office | 'All')}
+            />
+          </View>
         </View>
       )}
 
@@ -104,8 +121,11 @@ export default function LeadsScreen() {
         data={filtered}
         keyExtractor={item => item.id}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, isWide && styles.listContentWide]}
         showsVerticalScrollIndicator={false}
+        numColumns={isWide ? 2 : 1}
+        key={isWide ? 'wide' : 'narrow'}
+        columnWrapperStyle={isWide ? listStyles.columnWrapper : undefined}
         ListEmptyComponent={
           <EmptyState
             icon={<Users size={40} color={Colors.textTertiary} />}
@@ -115,13 +135,15 @@ export default function LeadsScreen() {
         }
       />
 
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => router.push('/add-lead')}
-        activeOpacity={0.8}
-      >
-        <Plus size={24} color={Colors.white} />
-      </TouchableOpacity>
+      {!isWide && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => router.push('/add-lead')}
+          activeOpacity={0.8}
+        >
+          <Plus size={24} color={Colors.white} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -189,6 +211,17 @@ const chipStyles = StyleSheet.create({
   },
 });
 
+const listStyles = StyleSheet.create({
+  wideItem: {
+    flex: 1,
+    maxWidth: '50%' as unknown as number,
+    paddingHorizontal: 4,
+  },
+  columnWrapper: {
+    gap: 0,
+  },
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -200,6 +233,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 10,
   },
+  searchRowWide: {
+    paddingHorizontal: 24,
+  },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
@@ -210,6 +246,9 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  searchBarWide: {
+    maxWidth: 400,
   },
   searchInput: {
     flex: 1,
@@ -231,9 +270,31 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
     backgroundColor: Colors.primaryMuted,
   },
+  addBtnInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: Colors.primary,
+  },
+  addBtnText: {
+    color: Colors.white,
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
   filterSection: {
     paddingHorizontal: 16,
     paddingBottom: 12,
+  },
+  filterSectionWide: {
+    flexDirection: 'row',
+    gap: 24,
+    paddingHorizontal: 24,
+  },
+  filterGroupWide: {
+    flex: 1,
   },
   filterLabel: {
     color: Colors.textTertiary,
@@ -254,6 +315,9 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 100,
+  },
+  listContentWide: {
+    paddingHorizontal: 20,
   },
   fab: {
     position: 'absolute',

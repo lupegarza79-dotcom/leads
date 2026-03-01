@@ -1,11 +1,10 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Plus, ChevronLeft, ChevronRight } from 'lucide-react-native';
@@ -13,101 +12,109 @@ import { Colors, StatusColors } from '@/constants/colors';
 import { PIPELINE_STATUSES } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { LeadCard } from '@/components/LeadCard';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const COLUMN_WIDTH = SCREEN_WIDTH - 40;
+import { useResponsive } from '@/hooks/useResponsive';
 
 export default function PipelineScreen() {
   const router = useRouter();
   const { followUps, getLeadsByStatus } = useLeads();
   const [activeColumnIndex, setActiveColumnIndex] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  const { width, isWide, isDesktop } = useResponsive();
 
-  const activeStatuses = PIPELINE_STATUSES.filter(s => s !== 'Lost' && s !== 'Renewal Scheduled');
+  const activeStatuses = useMemo(
+    () => PIPELINE_STATUSES.filter(s => s !== 'Lost' && s !== 'Renewal Scheduled'),
+    []
+  );
 
   const handleLeadPress = useCallback((id: string) => {
     router.push(`/lead/${id}`);
   }, [router]);
 
+  const visibleCount = isDesktop ? activeStatuses.length : isWide ? 3 : 1;
+  const columnWidth = isDesktop
+    ? Math.floor((width - 60 - (activeStatuses.length - 1) * 12) / activeStatuses.length)
+    : isWide
+    ? Math.floor((width - 48 - 24) / 3)
+    : width - 40;
+
   const scrollToColumn = useCallback((index: number) => {
-    setActiveColumnIndex(index);
-    scrollRef.current?.scrollTo({ x: index * (COLUMN_WIDTH + 12), animated: true });
-  }, []);
+    setActiveColumnIndex(Math.max(0, Math.min(index, activeStatuses.length - 1)));
+  }, [activeStatuses.length]);
 
   const goLeft = useCallback(() => {
     if (activeColumnIndex > 0) scrollToColumn(activeColumnIndex - 1);
   }, [activeColumnIndex, scrollToColumn]);
 
   const goRight = useCallback(() => {
-    if (activeColumnIndex < activeStatuses.length - 1) scrollToColumn(activeColumnIndex + 1);
-  }, [activeColumnIndex, activeStatuses.length, scrollToColumn]);
+    if (activeColumnIndex < activeStatuses.length - visibleCount) scrollToColumn(activeColumnIndex + 1);
+  }, [activeColumnIndex, activeStatuses.length, visibleCount, scrollToColumn]);
+
+  const visibleStatuses = isDesktop
+    ? activeStatuses
+    : activeStatuses.slice(activeColumnIndex, activeColumnIndex + visibleCount);
 
   return (
     <View style={styles.container}>
-      <View style={styles.navRow}>
-        <TouchableOpacity
-          onPress={goLeft}
-          style={[styles.navButton, activeColumnIndex === 0 && styles.navDisabled]}
-          disabled={activeColumnIndex === 0}
-        >
-          <ChevronLeft size={20} color={activeColumnIndex === 0 ? Colors.textTertiary : Colors.textPrimary} />
-        </TouchableOpacity>
+      {!isDesktop && (
+        <View style={styles.navRow}>
+          <TouchableOpacity
+            onPress={goLeft}
+            style={[styles.navButton, activeColumnIndex === 0 && styles.navDisabled]}
+            disabled={activeColumnIndex === 0}
+          >
+            <ChevronLeft size={20} color={activeColumnIndex === 0 ? Colors.textTertiary : Colors.textPrimary} />
+          </TouchableOpacity>
 
-        <View style={styles.statusTabs}>
-          {activeStatuses.map((status, i) => {
-            const statusColor = StatusColors[status];
-            const isActive = i === activeColumnIndex;
-            const count = getLeadsByStatus(status).length;
-            return (
-              <TouchableOpacity
-                key={status}
-                onPress={() => scrollToColumn(i)}
-                style={[
-                  styles.statusTab,
-                  isActive && { backgroundColor: statusColor?.bg ?? Colors.primaryMuted },
-                ]}
-              >
-                <View style={[styles.statusDot, { backgroundColor: statusColor?.dot ?? Colors.primary }]} />
-                {isActive && (
-                  <Text style={[styles.statusTabText, { color: statusColor?.text ?? Colors.primary }]}>
-                    {status} ({count})
-                  </Text>
-                )}
-                {!isActive && count > 0 && (
-                  <Text style={styles.countBubble}>{count}</Text>
-                )}
-              </TouchableOpacity>
-            );
-          })}
+          <View style={styles.statusTabs}>
+            {activeStatuses.map((status, i) => {
+              const statusColor = StatusColors[status];
+              const isActive = i >= activeColumnIndex && i < activeColumnIndex + visibleCount;
+              const count = getLeadsByStatus(status).length;
+              return (
+                <TouchableOpacity
+                  key={status}
+                  onPress={() => scrollToColumn(i)}
+                  style={[
+                    styles.statusTab,
+                    isActive && { backgroundColor: statusColor?.bg ?? Colors.primaryMuted },
+                  ]}
+                >
+                  <View style={[styles.statusDot, { backgroundColor: statusColor?.dot ?? Colors.primary }]} />
+                  {isActive && (
+                    <Text style={[styles.statusTabText, { color: statusColor?.text ?? Colors.primary }]}>
+                      {status} ({count})
+                    </Text>
+                  )}
+                  {!isActive && count > 0 && (
+                    <Text style={styles.countBubble}>{count}</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <TouchableOpacity
+            onPress={goRight}
+            style={[styles.navButton, activeColumnIndex >= activeStatuses.length - visibleCount && styles.navDisabled]}
+            disabled={activeColumnIndex >= activeStatuses.length - visibleCount}
+          >
+            <ChevronRight size={20} color={activeColumnIndex >= activeStatuses.length - visibleCount ? Colors.textTertiary : Colors.textPrimary} />
+          </TouchableOpacity>
         </View>
+      )}
 
-        <TouchableOpacity
-          onPress={goRight}
-          style={[styles.navButton, activeColumnIndex === activeStatuses.length - 1 && styles.navDisabled]}
-          disabled={activeColumnIndex === activeStatuses.length - 1}
-        >
-          <ChevronRight size={20} color={activeColumnIndex === activeStatuses.length - 1 ? Colors.textTertiary : Colors.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        pagingEnabled={false}
-        snapToInterval={COLUMN_WIDTH + 12}
-        decelerationRate="fast"
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.columnsContainer}
-        onMomentumScrollEnd={(e) => {
-          const index = Math.round(e.nativeEvent.contentOffset.x / (COLUMN_WIDTH + 12));
-          setActiveColumnIndex(Math.max(0, Math.min(index, activeStatuses.length - 1)));
-        }}
-      >
-        {activeStatuses.map((status) => {
+      <View style={[styles.columnsRow, isDesktop && styles.columnsRowDesktop]}>
+        {visibleStatuses.map((status) => {
           const statusLeads = getLeadsByStatus(status);
           const statusColor = StatusColors[status];
           return (
-            <View key={status} style={[styles.column, { width: COLUMN_WIDTH }]}>
+            <View
+              key={status}
+              style={[
+                styles.column,
+                { width: isDesktop ? undefined : columnWidth },
+                isDesktop && styles.columnDesktop,
+              ]}
+            >
               <View style={styles.columnHeader}>
                 <View style={styles.columnTitleRow}>
                   <View style={[styles.columnDot, { backgroundColor: statusColor?.dot ?? Colors.primary }]} />
@@ -144,7 +151,7 @@ export default function PipelineScreen() {
             </View>
           );
         })}
-      </ScrollView>
+      </View>
 
       <TouchableOpacity
         style={styles.fab}
@@ -206,12 +213,22 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600' as const,
   },
-  columnsContainer: {
+  columnsRow: {
+    flex: 1,
+    flexDirection: 'row',
     paddingHorizontal: 20,
     gap: 12,
   },
+  columnsRowDesktop: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
   column: {
-    marginRight: 12,
+    marginRight: 0,
+  },
+  columnDesktop: {
+    flex: 1,
+    minWidth: 0,
   },
   columnHeader: {
     flexDirection: 'row',
@@ -232,7 +249,7 @@ const styles = StyleSheet.create({
   },
   columnTitle: {
     color: Colors.textPrimary,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700' as const,
   },
   columnCount: {

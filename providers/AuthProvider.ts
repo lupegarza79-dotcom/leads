@@ -2,26 +2,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { supabase } from '@/lib/supabase';
-import type { Session, User } from '@supabase/supabase-js';
 import type { User as AppUser } from '@/constants/config';
 import { USERS } from '@/constants/config';
 
-interface AuthState {
-  session: Session | null;
-  user: User | null;
-  appUser: AppUser | null;
-  isLoading: boolean;
-  isAuthenticated: boolean;
-}
-
 export const [AuthProvider, useAuth] = createContextHook(() => {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Record<string, unknown> | null>(null);
+  const [user, setUser] = useState<{ email?: string } | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
+    supabase.auth.getSession().then(({ data: { session: s } }: { data: { session: any } }) => {
       console.log('[Auth] Initial session:', s?.user?.email ?? 'none');
       setSession(s);
       setUser(s?.user ?? null);
@@ -32,7 +23,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setIsLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, s: any) => {
       console.log('[Auth] State changed:', _event, s?.user?.email ?? 'none');
       setSession(s);
       setUser(s?.user ?? null);
@@ -70,13 +61,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     },
   });
 
+  const { mutateAsync: signInAsync } = signInMutation;
+  const { mutateAsync: signOutAsync } = signOutMutation;
+
   const signIn = useCallback((email: string) => {
-    return signInMutation.mutateAsync(email);
-  }, [signInMutation]);
+    return signInAsync(email);
+  }, [signInAsync]);
 
   const signOut = useCallback(() => {
-    return signOutMutation.mutateAsync();
-  }, [signOutMutation]);
+    return signOutAsync();
+  }, [signOutAsync]);
 
   return {
     session,
