@@ -13,7 +13,6 @@ import {
 import { Shield, Mail, ArrowRight, CheckCircle } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
-import { USERS } from '@/constants/config';
 
 export default function LoginScreen() {
   const { signIn, signInPending } = useAuth();
@@ -24,12 +23,6 @@ export default function LoginScreen() {
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) {
       Alert.alert('Required', 'Please enter your email address.');
-      return;
-    }
-
-    const isAllowed = USERS.some(u => u.email.toLowerCase() === trimmed);
-    if (!isAllowed) {
-      Alert.alert('Access Denied', 'This email is not authorized. Contact your administrator.');
       return;
     }
 
@@ -56,7 +49,7 @@ export default function LoginScreen() {
             <Text style={styles.emailHighlight}>{email.trim().toLowerCase()}</Text>
           </Text>
           <Text style={styles.hint}>
-            Click the link in your email to sign in. Check your spam folder if you don't see it.
+            Click the link in your email to sign in. Check your spam folder if you don{"'"}t see it.
           </Text>
           <TouchableOpacity
             style={styles.secondaryBtn}
@@ -121,18 +114,9 @@ export default function LoginScreen() {
           )}
         </TouchableOpacity>
 
-        <View style={styles.usersHint}>
-          <Text style={styles.usersHintLabel}>Authorized users:</Text>
-          {USERS.map(u => (
-            <TouchableOpacity
-              key={u.id}
-              onPress={() => setEmail(u.email)}
-              style={styles.userChip}
-            >
-              <Text style={styles.userChipText}>{u.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <Text style={styles.accessNote}>
+          Only Supabase-invited users with a matching mg_users record can access this app.
+        </Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -258,32 +242,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600' as const,
   },
-  usersHint: {
-    marginTop: 20,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 6,
-    justifyContent: 'center',
-  },
-  usersHintLabel: {
+  accessNote: {
     color: Colors.textTertiary,
     fontSize: 11,
-    width: '100%',
     textAlign: 'center' as const,
-    marginBottom: 4,
-  },
-  userChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: Colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-  },
-  userChipText: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '500' as const,
+    marginTop: 16,
+    lineHeight: 16,
   },
 });

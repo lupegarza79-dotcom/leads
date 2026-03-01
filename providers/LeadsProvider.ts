@@ -61,7 +61,13 @@ async function fetchMgUsers(): Promise<{ id: string; name: string; role: string;
     console.log('[Supabase] Error fetching mg_users:', error.message);
     return [];
   }
-  return data ?? [];
+  return (data ?? []).map((u: Record<string, unknown>) => ({
+    id: u.id as string,
+    email: u.email as string,
+    name: (u.full_name ?? u.name ?? '') as string,
+    role: u.role as string,
+    office: u.office as string,
+  }));
 }
 
 export const [LeadsProvider, useLeads] = createContextHook(() => {

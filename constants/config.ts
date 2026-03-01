@@ -1,4 +1,4 @@
-export const OFFICES = ['McAllen', 'San Juan'] as const;
+export const OFFICES = ['McAllen', 'San Juan', 'Other'] as const;
 export type Office = (typeof OFFICES)[number];
 
 export const LEAD_SOURCES = ['WhatsApp', 'Call', 'FB', 'Referral', 'Other'] as const;
@@ -18,21 +18,6 @@ export type PipelineStatus = (typeof PIPELINE_STATUSES)[number];
 
 export const ACTIVITY_TYPES = ['call', 'whatsapp', 'email', 'note', 'status_change'] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
-
-export const USERS: User[] = [
-  { id: 'josefina', name: 'Josefina', role: 'orchestrator', office: 'McAllen', email: 'mgincometax@gmail.com' },
-  { id: 'nayeli', name: 'Nayeli', role: 'producer', office: 'McAllen', email: 'nayelicano655@gmail.com' },
-  { id: 'patricia', name: 'Patricia', role: 'producer', office: 'San Juan', email: 'patricia.mgoficinas@gmail.com' },
-  { id: 'gagl', name: 'GAGL', role: 'manager', office: 'McAllen', email: 'vitamg6512@gmail.com' },
-];
-
-export interface User {
-  id: string;
-  name: string;
-  role: 'orchestrator' | 'producer' | 'manager';
-  office: Office;
-  email: string;
-}
 
 export interface WorkingHoursConfig {
   [day: number]: { open: string; close: string } | null;

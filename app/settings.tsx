@@ -2,11 +2,13 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { Building2, Clock, AlertTriangle, Mail, MessageCircle, Users, LogOut, User } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
-import { OFFICES, USERS, SLA_THRESHOLDS, WORKING_HOURS, NOTIFICATION_CHANNELS, FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
+import { OFFICES, SLA_THRESHOLDS, WORKING_HOURS, NOTIFICATION_CHANNELS, FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
 import { useAuth } from '@/providers/AuthProvider';
+import { useLeads } from '@/providers/LeadsProvider';
 
 export default function SettingsScreen() {
   const { user, appUser, signOut, signOutPending } = useAuth();
+  const { mgUsers } = useLeads();
 
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -68,6 +70,9 @@ export default function SettingsScreen() {
         {OFFICES.map(office => (
           <View key={office} style={styles.row}>
             <Text style={styles.rowText}>{office}</Text>
+            {office === 'San Juan' && (
+              <Text style={styles.rowMetaWarn}>Transitional</Text>
+            )}
           </View>
         ))}
       </View>
@@ -75,14 +80,20 @@ export default function SettingsScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Users size={16} color={Colors.primary} />
-          <Text style={styles.sectionTitle}>Users</Text>
+          <Text style={styles.sectionTitle}>Team (from mg_users)</Text>
         </View>
-        {USERS.map(u => (
-          <View key={u.id} style={styles.row}>
-            <Text style={styles.rowText}>{u.name}</Text>
-            <Text style={styles.rowMeta}>{u.role} · {u.office}</Text>
+        {mgUsers.length === 0 ? (
+          <View style={styles.row}>
+            <Text style={styles.rowTextMuted}>No users loaded from Supabase</Text>
           </View>
-        ))}
+        ) : (
+          mgUsers.map(u => (
+            <View key={u.id} style={styles.row}>
+              <Text style={styles.rowText}>{u.name}</Text>
+              <Text style={styles.rowMeta}>{u.role} · {u.office}</Text>
+            </View>
+          ))
+        )}
       </View>
 
       <View style={styles.section}>
@@ -253,9 +264,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     flex: 1,
   },
+  rowTextMuted: {
+    color: Colors.textTertiary,
+    fontSize: 14,
+    fontStyle: 'italic' as const,
+  },
   rowMeta: {
     color: Colors.textSecondary,
     fontSize: 13,
+  },
+  rowMetaWarn: {
+    color: Colors.warning,
+    fontSize: 12,
+    fontWeight: '600' as const,
   },
   rowValue: {
     color: Colors.primary,

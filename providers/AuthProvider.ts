@@ -23,8 +23,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return null;
     }
     if (data) {
-      console.log('[Auth] Resolved mg_user:', data.name, data.role);
-      return data as MgUser;
+      const mapped: MgUser = {
+        id: data.id,
+        email: data.email,
+        name: data.full_name ?? data.name ?? '',
+        role: data.role,
+        office: data.office,
+      };
+      console.log('[Auth] Resolved mg_user:', mapped.name, mapped.role);
+      return mapped;
     }
     console.log('[Auth] No mg_user found for:', email);
     return null;
