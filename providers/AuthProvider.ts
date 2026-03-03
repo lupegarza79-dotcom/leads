@@ -68,10 +68,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const signInMutation = useMutation({
     mutationFn: async (email: string) => {
       console.log('[Auth] Sending magic link to:', email);
+      const redirectUrl = typeof window !== 'undefined'
+        ? window.location.origin + window.location.pathname
+        : 'https://rork.app/preview/04bqv2vrl4xpgxvv6560n';
+      console.log('[Auth] emailRedirectTo:', redirectUrl);
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           shouldCreateUser: false,
+          emailRedirectTo: redirectUrl,
         },
       });
       if (error) throw error;
