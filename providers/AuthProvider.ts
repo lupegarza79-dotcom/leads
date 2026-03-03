@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
-import { supabase } from '@/lib/supabase';
+import { supabase, handleWebAuthHash } from '@/lib/supabase';
 import type { MgUser } from '@/types/leads';
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
-  const [session, setSession] = useState<Record<string, unknown> | null>(null);
+  const [session, setSession] = useState<any>(null);
   const [user, setUser] = useState<{ email?: string } | null>(null);
   const [appUser, setAppUser] = useState<MgUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,7 +38,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session: s } }: { data: { session: any } }) => {
+    const initAuth = async () => {
+      const handledHash = await handleWebAuthHash();
+      console.log('[Auth] Web hash handled:', handledHash);
+
+      const { data: { session: s } } = await supabase.auth.getSession();
       console.log('[Auth] Initial session:', s?.user?.email ?? 'none');
       setSession(s);
       setUser(s?.user ?? null);
@@ -47,7 +51,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setAppUser(resolved);
       }
       setIsLoading(false);
-    });
+    };
+    initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event: string, s: any) => {
       console.log('[Auth] State changed:', _event, s?.user?.email ?? 'none');
