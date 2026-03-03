@@ -21,8 +21,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (isLoading) return;
 
     const inLoginScreen = segments[0] === 'login';
+    const inAuthCallback = segments[0] === 'auth';
 
-    if (!isAuthenticated && !inLoginScreen) {
+    if (!isAuthenticated && !inLoginScreen && !inAuthCallback) {
       console.log('[AuthGate] Not authenticated, redirecting to login');
       router.replace('/login');
     } else if (isAuthenticated && inLoginScreen) {
@@ -75,6 +76,13 @@ function RootLayoutNav() {
             presentation: "modal",
             title: "Lead Details",
             headerStyle: { backgroundColor: Colors.surfaceElevated },
+          }}
+        />
+        <Stack.Screen
+          name="auth/callback"
+          options={{
+            headerShown: false,
+            gestureEnabled: false,
           }}
         />
         <Stack.Screen
