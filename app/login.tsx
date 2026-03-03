@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,11 +13,20 @@ import {
 import { Shield, Mail, ArrowRight, CheckCircle } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
+import { useRouter } from 'expo-router';
 
 export default function LoginScreen() {
-  const { signIn, signInPending } = useAuth();
+  const { signIn, signInPending, isAuthenticated, isLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      console.log('[Login] Session detected, redirecting to /...');
+      router.replace('/');
+    }
+  }, [isLoading, isAuthenticated, router]);
 
   const handleSignIn = useCallback(async () => {
     const trimmed = email.trim().toLowerCase();
