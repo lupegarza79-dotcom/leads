@@ -70,6 +70,32 @@ async function fetchMgUsers(): Promise<{ id: string; name: string; role: string;
   }));
 }
 
+const defaultLeadsValue = {
+  leads: [] as Lead[],
+  activities: [] as ActivityLogEntry[],
+  followUps: [] as FollowUpTask[],
+  mgUsers: [] as { id: string; name: string; role: string; office: string; email: string }[],
+  metrics: {
+    leadsToday: 0, leadsThisWeek: 0, leadsUnassigned: 0, leadsNeedingContact: 0,
+    followUpDueToday: 0, contactSpeedPercent: 0, conversionPercent: 0,
+    closedPerProducer: {}, stuckLeads: 0, commissionProjection: 0,
+    leadsAtRisk: 0, leadsClosed: 0, followUpOverdue: 0,
+  } as DashboardMetrics,
+  isLoading: true,
+  addLead: async () => ({} as Lead),
+  addingLead: false,
+  updateLead: async () => ({} as Lead),
+  changeStatus: async () => ({} as Lead),
+  addActivity: async () => ({} as ActivityLogEntry),
+  completeFollowUp: async () => {},
+  getLeadById: () => null as Lead | null,
+  getActivitiesForLead: () => [] as ActivityLogEntry[],
+  getFollowUpsForLead: () => [] as FollowUpTask[],
+  getLeadsByStatus: () => [] as Lead[],
+  getUserById: () => null as { id: string; name: string; role: string; office: string; email: string } | null,
+  refetch: () => {},
+};
+
 export const [LeadsProvider, useLeads] = createContextHook(() => {
   const queryClient = useQueryClient();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -508,4 +534,4 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       queryClient.invalidateQueries({ queryKey: ['followups'] });
     },
   };
-});
+}, defaultLeadsValue);
