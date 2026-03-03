@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
-import { supabase, handleWebAuthHash } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import type { MgUser } from '@/types/leads';
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
@@ -39,9 +39,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   useEffect(() => {
     const initAuth = async () => {
-      const handledHash = await handleWebAuthHash();
-      console.log('[Auth] Web hash handled:', handledHash);
-
       const { data: { session: s } } = await supabase.auth.getSession();
       console.log('[Auth] Initial session:', s?.user?.email ?? 'none');
       setSession(s);
@@ -49,6 +46,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (s?.user?.email) {
         const resolved = await resolveAppUser(s.user.email);
         setAppUser(resolved);
+        if (!resolved) {
+          console.log('[Auth] No mg_user match on init, signing out');
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+          setAppUser(null);
+        }
       }
       setIsLoading(false);
     };
@@ -70,22 +74,55 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return () => subscription.unsubscribe();
   }, [resolveAppUser]);
 
-  const signInMutation = useMutation({
+  const sendOtpMutation = useMutation({
     mutationFn: async (email: string) => {
-      console.log('[Auth] Sending magic link to:', email);
-      const redirectUrl = 'https://rork.com/p/04bqv2vrl4xpgxvv6560n/login';
-      console.log('[Auth] emailRedirectTo:', redirectUrl);
+      console.log('[Auth] Sending OTP to:', email);
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           shouldCreateUser: false,
-          emailRedirectTo: redirectUrl,
         },
       });
       if (error) throw error;
+      console.log('[Auth] OTP sent successfully to:', email);
       return email;
     },
   });
+
+  const verifyOtpMutation = useMutation({
+    mutationFn: async ({ email, token }: { email: string; token: string }) => {
+      console.log('[Auth] Verifying OTP for:', email);
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token,
+        type: 'email',
+      });
+      if (error) throw error;
+
+      const userEmail = data.user?.email;
+      if (!userEmail) {
+        throw new Error('Verification succeeded but no user email returned.');
+      }
+
+      const resolved = await resolveAppUser(userEmail);
+      if (!resolved) {
+        console.log('[Auth] No mg_user match, signing out unauthorized user');
+        await supabase.auth.signOut();
+        throw new Error('Unauthorized. Your email is not registered in this system.');
+      }
+
+      console.log('[Auth] OTP verified, user authorized:', resolved.name);
+      return resolved;
+    },
+  });
+
+  const sendOtp = useCallback((email: string) => {
+    return sendOtpMutation.mutateAsync(email);
+  }, [sendOtpMutation.mutateAsync]);
+
+  const verifyOtp = useCallback((email: string, token: string) => {
+    return verifyOtpMutation.mutateAsync({ email, token });
+  }, [verifyOtpMutation.mutateAsync]);
 
   const signOutMutation = useMutation({
     mutationFn: async () => {
@@ -95,26 +132,22 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     },
   });
 
-  const { mutateAsync: signInAsync } = signInMutation;
-  const { mutateAsync: signOutAsync } = signOutMutation;
-
-  const signIn = useCallback((email: string) => {
-    return signInAsync(email);
-  }, [signInAsync]);
-
   const signOut = useCallback(() => {
-    return signOutAsync();
-  }, [signOutAsync]);
+    return signOutMutation.mutateAsync();
+  }, [signOutMutation.mutateAsync]);
 
   return {
     session,
     user,
     appUser,
     isLoading,
-    isAuthenticated: !!session && !!user,
-    signIn,
-    signInPending: signInMutation.isPending,
-    signInError: signInMutation.error,
+    isAuthenticated: !!session && !!appUser,
+    sendOtp,
+    sendOtpPending: sendOtpMutation.isPending,
+    sendOtpError: sendOtpMutation.error,
+    verifyOtp,
+    verifyOtpPending: verifyOtpMutation.isPending,
+    verifyOtpError: verifyOtpMutation.error,
     signOut,
     signOutPending: signOutMutation.isPending,
   };
