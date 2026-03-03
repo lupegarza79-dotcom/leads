@@ -175,6 +175,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
 
   const addLeadMutation = useMutation({
     mutationFn: async (input: LeadCreateInput) => {
+      console.log('[LeadsEngine] addLead mutationFn called with:', input.full_name);
       const now = new Date().toISOString();
       const newLead = {
         full_name: input.full_name,
@@ -194,6 +195,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         commission_estimate: null,
       };
 
+      console.log('[Supabase] Inserting into mg_leads...');
       const { data: leadData, error: leadError } = await supabase
         .from('mg_leads')
         .insert(newLead)
@@ -201,21 +203,33 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         .single();
 
       if (leadError) {
-        console.log('[Supabase] Error creating lead:', leadError.message);
-        throw leadError;
+        console.log('[Supabase] Error creating lead:', leadError.message, leadError.code, leadError.details);
+        throw new Error(`Failed to create lead: ${leadError.message}`);
       }
 
-      const { error: activityError } = await supabase
-        .from('mg_activity_log')
-        .insert({
-          lead_id: leadData.id,
-          user_id: input.owner_id ?? 'system',
-          type: 'note',
-          note: `Lead created from ${input.source}`,
-        });
+      if (!leadData) {
+        console.log('[Supabase] Lead insert returned no data (possible RLS issue)');
+        throw new Error('Lead was not created. Check database permissions.');
+      }
 
-      if (activityError) {
-        console.log('[Supabase] Error creating activity:', activityError.message);
+      console.log('[Supabase] Lead inserted:', leadData.id);
+
+      try {
+        const activityUserId = input.owner_id ?? leadData.id;
+        const { error: activityError } = await supabase
+          .from('mg_activity_log')
+          .insert({
+            lead_id: leadData.id,
+            user_id: activityUserId,
+            type: 'note',
+            note: `Lead created from ${input.source}`,
+          });
+
+        if (activityError) {
+          console.log('[Supabase] Non-critical: activity log insert failed:', activityError.message);
+        }
+      } catch (activityErr) {
+        console.log('[Supabase] Non-critical: activity log insert threw:', activityErr);
       }
 
       console.log(`[LeadsEngine] Lead created: ${leadData.full_name} (${leadData.id})`);

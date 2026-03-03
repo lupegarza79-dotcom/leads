@@ -19,7 +19,8 @@ import { useLeads } from '@/providers/LeadsProvider';
 
 export default function AddLeadScreen() {
   const router = useRouter();
-  const { addLead, addingLead, mgUsers } = useLeads();
+  const { addLead, mgUsers } = useLeads();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
@@ -43,7 +44,10 @@ export default function AddLeadScreen() {
       Alert.alert('Required', 'Please enter a phone number.');
       return;
     }
+    if (isSubmitting) return;
 
+    setIsSubmitting(true);
+    console.log('[AddLead] Submitting lead...');
     try {
       await addLead({
         full_name: fullName.trim(),
@@ -57,11 +61,14 @@ export default function AddLeadScreen() {
       });
       console.log('[AddLead] Lead created successfully');
       router.back();
-    } catch (e) {
-      console.log('[AddLead] Error:', e);
-      Alert.alert('Error', 'Failed to create lead. Please try again.');
+    } catch (e: any) {
+      console.log('[AddLead] Error creating lead:', e?.message ?? e);
+      Alert.alert('Error', e?.message ?? 'Failed to create lead. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+      console.log('[AddLead] Submit flow finished, loading reset');
     }
-  }, [fullName, phone, email, office, source, ownerId, notes, premium, addLead, router]);
+  }, [fullName, phone, email, office, source, ownerId, notes, premium, addLead, router, isSubmitting]);
 
   return (
     <KeyboardAvoidingView
@@ -195,13 +202,13 @@ export default function AddLeadScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.submitBtn, addingLead && styles.submitBtnDisabled]}
+          style={[styles.submitBtn, isSubmitting && styles.submitBtnDisabled]}
           onPress={handleSubmit}
-          disabled={addingLead}
+          disabled={isSubmitting}
           activeOpacity={0.8}
           testID="submit-lead"
         >
-          {addingLead ? (
+          {isSubmitting ? (
             <ActivityIndicator color={Colors.white} size="small" />
           ) : (
             <Text style={styles.submitText}>Create Lead</Text>
