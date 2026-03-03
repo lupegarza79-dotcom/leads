@@ -86,7 +86,7 @@ export default function LoginScreen() {
     const trimmed = email.trim().toLowerCase();
     const code = otpCode.trim();
     if (!code || code.length < 6) {
-      Alert.alert('Required', 'Please enter the 6-digit code from your email.');
+      Alert.alert('Required', 'Please enter the verification code from your email.');
       return;
     }
     setError(null);
@@ -137,7 +137,7 @@ export default function LoginScreen() {
           <Text style={styles.brand}>MG LEADS ENGINE</Text>
           <Text style={styles.title}>Enter Code</Text>
           <Text style={styles.subtitle}>
-            We sent a 6-digit code to{'\n'}
+            We sent a verification code to{'\n'}
             <Text style={styles.emailHighlight}>{email.trim().toLowerCase()}</Text>
           </Text>
 
@@ -153,11 +153,11 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.otpInput}
                 value={otpCode}
-                onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, '').slice(0, 6))}
-                placeholder="000000"
+                onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, '').slice(0, 8))}
+                placeholder="00000000"
                 placeholderTextColor={Colors.textTertiary}
                 keyboardType="number-pad"
-                maxLength={6}
+                maxLength={8}
                 autoFocus
                 editable={!verifyOtpPending}
                 testID="login-otp"
@@ -373,7 +373,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700' as const,
     paddingVertical: 14,
-    letterSpacing: 8,
+    letterSpacing: 4,
     textAlign: 'center' as const,
   },
   submitBtn: {
