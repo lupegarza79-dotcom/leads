@@ -38,6 +38,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (isAuthenticated) {
+    return <LeadsProvider>{children}</LeadsProvider>;
+  }
+
   return <>{children}</>;
 }
 
@@ -96,9 +100,7 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <GestureHandlerRootView>
         <AuthProvider>
-          <LeadsProvider>
-            <RootLayoutNav />
-          </LeadsProvider>
+          <RootLayoutNav />
         </AuthProvider>
       </GestureHandlerRootView>
     </QueryClientProvider>

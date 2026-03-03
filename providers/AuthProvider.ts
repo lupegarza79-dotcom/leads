@@ -39,22 +39,45 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   useEffect(() => {
     const initAuth = async () => {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      console.log('[Auth] Initial session:', s?.user?.email ?? 'none');
-      setSession(s);
-      setUser(s?.user ?? null);
-      if (s?.user?.email) {
-        const resolved = await resolveAppUser(s.user.email);
-        setAppUser(resolved);
-        if (!resolved) {
-          console.log('[Auth] No mg_user match on init, signing out');
-          await supabase.auth.signOut();
-          setSession(null);
-          setUser(null);
-          setAppUser(null);
+      try {
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Session check timed out')), 5000)
+        );
+
+        const { data: { session: s } } = await Promise.race([sessionPromise, timeoutPromise]);
+        console.log('[Auth] Initial session:', s?.user?.email ?? 'none');
+        setSession(s);
+        setUser(s?.user ?? null);
+        if (s?.user?.email) {
+          try {
+            const resolved = await Promise.race([
+              resolveAppUser(s.user.email),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+            ]);
+            setAppUser(resolved);
+            if (!resolved) {
+              console.log('[Auth] No mg_user match on init, signing out');
+              await supabase.auth.signOut().catch(() => {});
+              setSession(null);
+              setUser(null);
+              setAppUser(null);
+            }
+          } catch (userError) {
+            console.log('[Auth] Error resolving app user:', userError);
+            setSession(null);
+            setUser(null);
+            setAppUser(null);
+          }
         }
+      } catch (error) {
+        console.log('[Auth] Init auth failed, showing login:', error);
+        setSession(null);
+        setUser(null);
+        setAppUser(null);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
     initAuth();
 
