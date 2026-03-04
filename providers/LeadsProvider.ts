@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/AuthProvider';
 import type { Lead, ActivityLogEntry, FollowUpTask, LeadCreateInput, DashboardMetrics } from '@/types/leads';
 import type { PipelineStatus } from '@/constants/config';
 import { FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
@@ -98,6 +99,7 @@ const defaultLeadsValue = {
 
 export const [LeadsProvider, useLeads] = createContextHook(() => {
   const queryClient = useQueryClient();
+  const { appUser } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activities, setActivities] = useState<ActivityLogEntry[]>([]);
   const [followUps, setFollowUps] = useState<FollowUpTask[]>([]);
@@ -215,18 +217,21 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       console.log('[Supabase] Lead inserted:', leadData.id);
 
       try {
-        const activityUserId = input.owner_id ?? leadData.id;
-        const { error: activityError } = await supabase
-          .from('mg_activity_log')
-          .insert({
-            lead_id: leadData.id,
-            user_id: activityUserId,
-            type: 'note',
-            note: `Lead created from ${input.source}`,
-          });
+        if (!appUser?.id) {
+          console.log('[Supabase] Non-critical: no authenticated user for activity log, skipping');
+        } else {
+          const { error: activityError } = await supabase
+            .from('mg_activity_log')
+            .insert({
+              lead_id: leadData.id,
+              user_id: appUser.id,
+              type: 'note',
+              note: `Lead created from ${input.source}`,
+            });
 
-        if (activityError) {
-          console.log('[Supabase] Non-critical: activity log insert failed:', activityError.message);
+          if (activityError) {
+            console.log('[Supabase] Non-critical: activity log insert failed:', activityError.message);
+          }
         }
       } catch (activityErr) {
         console.log('[Supabase] Non-critical: activity log insert threw:', activityErr);

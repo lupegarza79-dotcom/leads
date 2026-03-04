@@ -27,6 +27,7 @@ import { Colors, StatusColors } from '@/constants/colors';
 import { PIPELINE_STATUSES, ACTIVITY_TYPES } from '@/constants/config';
 import type { PipelineStatus, ActivityType } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
+import { useAuth } from '@/providers/AuthProvider';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ActivityItem } from '@/components/ActivityItem';
 import { formatPhone, formatDateTime, formatDate, formatCurrency } from '@/utils/formatters';
@@ -46,6 +47,7 @@ export default function LeadDetailScreen() {
     followUps: allFollowUps,
     getUserById,
   } = useLeads();
+  const { appUser } = useAuth();
 
   const lead = getLeadById(id ?? '');
   const leadActivities = getActivitiesForLead(id ?? '');
@@ -67,9 +69,13 @@ export default function LeadDetailScreen() {
 
   const handleStatusChange = useCallback(async (status: PipelineStatus) => {
     if (!lead) return;
+    if (!appUser?.id) {
+      Alert.alert('Error', 'No authenticated user. Please log out and log back in.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await changeStatus({ id: lead.id, status, userId: lead.owner_id ?? 'system' });
+      await changeStatus({ id: lead.id, status, userId: appUser.id });
       setShowStatusPicker(false);
       console.log(`[LeadDetail] Status changed to ${status}`);
     } catch (_err) {
@@ -77,15 +83,19 @@ export default function LeadDetailScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [lead, changeStatus]);
+  }, [lead, changeStatus, appUser]);
 
   const handleAddActivity = useCallback(async () => {
     if (!lead || !activityNote.trim()) return;
+    if (!appUser?.id) {
+      Alert.alert('Error', 'No authenticated user. Please log out and log back in.');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await addActivity({
         lead_id: lead.id,
-        user_id: lead.owner_id ?? 'system',
+        user_id: appUser.id,
         type: activityType,
         note: activityNote.trim(),
       });
@@ -98,7 +108,7 @@ export default function LeadDetailScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [lead, activityType, activityNote, addActivity]);
+  }, [lead, activityType, activityNote, addActivity, appUser]);
 
   const handleCompleteFollowUp = useCallback(async (taskId: string) => {
     try {
