@@ -18,8 +18,11 @@ const WORKING_HOURS: Record<number, { open: number; close: number } | null> = {
   6: { open: 600, close: 900 },
 };
 
-const SLA_ESCALATE_MINUTES = 30;
+const OPERATIONAL_MINUTES = 30;
+const ESCALATION_MINUTES = 60;
 const COOLDOWN_MINUTES = 60;
+
+const FOLLOWUP_ACTIVITY_TYPES = ["call", "sms", "whatsapp", "note"];
 
 function isWithinBusinessHours(date: Date): boolean {
   const day = date.getDay();
@@ -76,6 +79,59 @@ function getBusinessMinutesBetween(start: Date, end: Date): number {
   return Math.round(total);
 }
 
+async function hasFollowUp(
+  supabase: ReturnType<typeof createClient>,
+  leadId: string,
+  createdAt: string,
+): Promise<boolean> {
+  const { data: activities } = await supabase
+    .from("mg_activity_log")
+    .select("id")
+    .eq("lead_id", leadId)
+    .in("type", FOLLOWUP_ACTIVITY_TYPES)
+    .gt("created_at", createdAt)
+    .limit(1);
+
+  if (activities && activities.length > 0) {
+    console.log(`[Escalation] Lead ${leadId}: follow-up found in mg_activity_log, skipping`);
+    return true;
+  }
+
+  const { data: lead } = await supabase
+    .from("mg_leads")
+    .select("contacted_at")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (lead?.contacted_at) {
+    console.log(`[Escalation] Lead ${leadId}: contacted_at is set (${lead.contacted_at}), skipping`);
+    return true;
+  }
+
+  return false;
+}
+
+async function wasAlreadySent(
+  supabase: ReturnType<typeof createClient>,
+  leadId: string,
+  type: "operational" | "escalation",
+  cooldownMs: number,
+  now: Date,
+): Promise<boolean> {
+  const cutoff = new Date(now.getTime() - cooldownMs).toISOString();
+
+  const { data } = await supabase
+    .from("mg_escalation_log")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("type", type)
+    .eq("status", "sent")
+    .gte("created_at", cutoff)
+    .limit(1);
+
+  return (data && data.length > 0) || false;
+}
+
 async function sendTwilioWhatsApp(
   to: string,
   body: string,
@@ -113,6 +169,30 @@ async function sendTwilioWhatsApp(
   }
 }
 
+async function logEscalation(
+  supabase: ReturnType<typeof createClient>,
+  leadId: string,
+  type: "operational" | "escalation",
+  toPhone: string,
+  message: string,
+  twilioResult: { success: boolean; sid?: string; error?: string },
+) {
+  const { error: logErr } = await supabase.from("mg_escalation_log").insert({
+    lead_id: leadId,
+    type,
+    channel: "whatsapp",
+    to_phone: toPhone,
+    message,
+    status: twilioResult.success ? "sent" : "failed",
+    provider_message_id: twilioResult.sid || null,
+    error_detail: twilioResult.error || null,
+  });
+
+  if (logErr) {
+    console.error(`[Escalation] Log insert error (${type}):`, logErr.message);
+  }
+}
+
 Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
@@ -132,7 +212,7 @@ Deno.serve(async (req) => {
 
     let query = supabase
       .from("mg_leads")
-      .select("id, full_name, phone, source, owner_id, created_at")
+      .select("id, full_name, phone, source, owner_id, created_at, contacted_at")
       .eq("status", "New");
 
     if (isTest && testLeadId) {
@@ -155,6 +235,7 @@ Deno.serve(async (req) => {
       lead_id: string;
       lead_name: string;
       minutes_elapsed: number;
+      stage: "operational" | "escalation" | "skipped";
       action: string;
       message_sid?: string;
       error?: string;
@@ -164,20 +245,22 @@ Deno.serve(async (req) => {
       const createdAt = new Date(lead.created_at);
       const elapsed = getBusinessMinutesBetween(createdAt, now);
 
-      if (!isTest && elapsed < SLA_ESCALATE_MINUTES) {
+      console.log(`[Escalation] Lead "${lead.full_name}" (${lead.id}): ${elapsed} business minutes elapsed`);
+
+      if (!isTest && elapsed < OPERATIONAL_MINUTES) {
+        console.log(`[Escalation] Lead ${lead.id}: ${elapsed}min < ${OPERATIONAL_MINUTES}min threshold, skipping`);
         continue;
       }
 
-      const { data: recentEscalations } = await supabase
-        .from("mg_escalation_log")
-        .select("id, created_at")
-        .eq("lead_id", lead.id)
-        .eq("status", "sent")
-        .gte("created_at", new Date(now.getTime() - COOLDOWN_MINUTES * 60000).toISOString())
-        .limit(1);
-
-      if (!isTest && recentEscalations && recentEscalations.length > 0) {
-        console.log(`[Escalation] Lead ${lead.id} already escalated within ${COOLDOWN_MINUTES}min, skipping`);
+      const followedUp = await hasFollowUp(supabase, lead.id, lead.created_at);
+      if (!isTest && followedUp) {
+        results.push({
+          lead_id: lead.id,
+          lead_name: lead.full_name,
+          minutes_elapsed: elapsed,
+          stage: "skipped",
+          action: "follow_up_exists",
+        });
         continue;
       }
 
@@ -192,65 +275,99 @@ Deno.serve(async (req) => {
           })()
         : "Unassigned";
 
-      const message =
-        `🚨 SLA ESCALATION\n` +
-        `Lead: ${lead.full_name}\n` +
-        `Phone: ${lead.phone}\n` +
-        `Source: ${lead.source}\n` +
-        `Owner: ${ownerName}\n` +
-        `Uncontacted for: ${elapsed} business minutes\n` +
-        `Created: ${createdAt.toLocaleString("en-US", { timeZone: "America/Chicago" })}\n` +
-        `Action required: Contact immediately or reassign.`;
+      if (elapsed >= ESCALATION_MINUTES || (isTest && elapsed >= 0)) {
+        const alreadySentEscalation = await wasAlreadySent(
+          supabase,
+          lead.id,
+          "escalation",
+          COOLDOWN_MINUTES * 60000,
+          now,
+        );
 
-      const twilioResult = await sendTwilioWhatsApp(ESCALATION_WHATSAPP_TO, message);
+        if (!isTest && alreadySentEscalation) {
+          console.log(`[Escalation] Lead ${lead.id}: escalation already sent within ${COOLDOWN_MINUTES}min cooldown`);
+        } else {
+          const message =
+            `🚨 ESCALATION ALERT (GAGL)\n` +
+            `Lead: ${lead.full_name}\n` +
+            `Phone: ${lead.phone}\n` +
+            `Source: ${lead.source}\n` +
+            `Owner: ${ownerName}\n` +
+            `Uncontacted for: ${elapsed} business minutes\n` +
+            `Created: ${createdAt.toLocaleString("en-US", { timeZone: "America/Chicago" })}\n` +
+            `MG team did not follow up. Action required: Contact immediately or reassign.`;
 
-      const { error: logErr } = await supabase.from("mg_escalation_log").insert({
-        lead_id: lead.id,
-        channel: "whatsapp",
-        to_phone: ESCALATION_WHATSAPP_TO,
-        message,
-        status: twilioResult.success ? "sent" : "failed",
-        provider_message_id: twilioResult.sid || null,
-        error_detail: twilioResult.error || null,
-      });
+          const twilioResult = await sendTwilioWhatsApp(ESCALATION_WHATSAPP_TO, message);
+          await logEscalation(supabase, lead.id, "escalation", ESCALATION_WHATSAPP_TO, message, twilioResult);
 
-      if (logErr) {
-        console.error(`[Escalation] Log insert error:`, logErr.message);
+          results.push({
+            lead_id: lead.id,
+            lead_name: lead.full_name,
+            minutes_elapsed: elapsed,
+            stage: "escalation",
+            action: twilioResult.success ? "sent" : "failed",
+            message_sid: twilioResult.sid,
+            error: twilioResult.error,
+          });
+
+          console.log(
+            `[Escalation] Lead "${lead.full_name}" (${lead.id}): ESCALATION ${twilioResult.success ? "SENT" : "FAILED"} to GAGL after ${elapsed}min`,
+          );
+        }
+      } else if (elapsed >= OPERATIONAL_MINUTES) {
+        const alreadySentOperational = await wasAlreadySent(
+          supabase,
+          lead.id,
+          "operational",
+          COOLDOWN_MINUTES * 60000,
+          now,
+        );
+
+        if (!isTest && alreadySentOperational) {
+          console.log(`[Escalation] Lead ${lead.id}: operational already sent within ${COOLDOWN_MINUTES}min cooldown`);
+        } else {
+          const message =
+            `⚠️ OPERATIONAL ALERT (MG Team)\n` +
+            `Lead: ${lead.full_name}\n` +
+            `Phone: ${lead.phone}\n` +
+            `Source: ${lead.source}\n` +
+            `Owner: ${ownerName}\n` +
+            `Uncontacted for: ${elapsed} business minutes\n` +
+            `Created: ${createdAt.toLocaleString("en-US", { timeZone: "America/Chicago" })}\n` +
+            `Action required: Follow up with this lead now.`;
+
+          const twilioResult = await sendTwilioWhatsApp(OPERATIONAL_WHATSAPP_TO, message);
+          await logEscalation(supabase, lead.id, "operational", OPERATIONAL_WHATSAPP_TO, message, twilioResult);
+
+          results.push({
+            lead_id: lead.id,
+            lead_name: lead.full_name,
+            minutes_elapsed: elapsed,
+            stage: "operational",
+            action: twilioResult.success ? "sent" : "failed",
+            message_sid: twilioResult.sid,
+            error: twilioResult.error,
+          });
+
+          console.log(
+            `[Escalation] Lead "${lead.full_name}" (${lead.id}): OPERATIONAL ${twilioResult.success ? "SENT" : "FAILED"} to MG after ${elapsed}min`,
+          );
+        }
       }
-
-      if (OPERATIONAL_WHATSAPP_TO && OPERATIONAL_WHATSAPP_TO !== ESCALATION_WHATSAPP_TO) {
-        const opResult = await sendTwilioWhatsApp(OPERATIONAL_WHATSAPP_TO, message);
-        await supabase.from("mg_escalation_log").insert({
-          lead_id: lead.id,
-          channel: "whatsapp",
-          to_phone: OPERATIONAL_WHATSAPP_TO,
-          message,
-          status: opResult.success ? "sent" : "failed",
-          provider_message_id: opResult.sid || null,
-          error_detail: opResult.error || null,
-        });
-      }
-
-      results.push({
-        lead_id: lead.id,
-        lead_name: lead.full_name,
-        minutes_elapsed: elapsed,
-        action: twilioResult.success ? "sent" : "failed",
-        message_sid: twilioResult.sid,
-        error: twilioResult.error,
-      });
-
-      console.log(
-        `[Escalation] Lead "${lead.full_name}" (${lead.id}): ${twilioResult.success ? "SENT" : "FAILED"} after ${elapsed}min`,
-      );
     }
 
     const response = {
       timestamp: now.toISOString(),
       test_mode: isTest,
+      thresholds: {
+        operational_minutes: OPERATIONAL_MINUTES,
+        escalation_minutes: ESCALATION_MINUTES,
+        cooldown_minutes: COOLDOWN_MINUTES,
+      },
       candidates_evaluated: candidates?.length ?? 0,
-      escalations_sent: results.filter((r) => r.action === "sent").length,
-      escalations_failed: results.filter((r) => r.action === "failed").length,
+      operational_sent: results.filter((r) => r.stage === "operational" && r.action === "sent").length,
+      escalations_sent: results.filter((r) => r.stage === "escalation" && r.action === "sent").length,
+      skipped_followup: results.filter((r) => r.stage === "skipped").length,
       results,
     };
 
