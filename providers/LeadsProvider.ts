@@ -191,7 +191,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         status: 'New' as const,
         notes: input.notes ?? '',
         last_touch_at: now,
-        next_followup_at: null,
+        next_followup_at: input.next_followup_at ?? null,
         quoted_at: null,
         closed_at: null,
         renewal_date: null,

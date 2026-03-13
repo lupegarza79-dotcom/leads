@@ -10,8 +10,8 @@ import {
 import { useRouter } from 'expo-router';
 import { Search, Plus, Filter, X, Users } from 'lucide-react-native';
 import { Colors, StatusColors } from '@/constants/colors';
-import { PIPELINE_STATUSES, UI_OFFICES } from '@/constants/config';
-import type { PipelineStatus, Office } from '@/constants/config';
+import { PIPELINE_STATUSES } from '@/constants/config';
+import type { PipelineStatus } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { LeadCard } from '@/components/LeadCard';
 import { EmptyState } from '@/components/EmptyState';
@@ -23,7 +23,7 @@ export default function LeadsScreen() {
   const { leads, followUps, getUserById } = useLeads();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | 'All'>('All');
-  const [officeFilter, setOfficeFilter] = useState<Office | 'All'>('All');
+
   const [showFilters, setShowFilters] = useState(false);
   const { isWide } = useResponsive();
 
@@ -40,11 +40,8 @@ export default function LeadsScreen() {
     if (statusFilter !== 'All') {
       result = result.filter(l => l.status === statusFilter);
     }
-    if (officeFilter !== 'All') {
-      result = result.filter(l => l.office === officeFilter);
-    }
     return result;
-  }, [leads, search, statusFilter, officeFilter]);
+  }, [leads, search, statusFilter]);
 
   const handlePress = useCallback((id: string) => {
     router.push(`/lead/${id}`);
@@ -107,14 +104,7 @@ export default function LeadsScreen() {
               onSelect={(v) => setStatusFilter(v as PipelineStatus | 'All')}
             />
           </View>
-          <View style={isWide ? styles.filterGroupWide : undefined}>
-            <Text style={[styles.filterLabel, !isWide && { marginTop: 10 }]}>Office</Text>
-            <ScrollableChips
-              items={['All', ...UI_OFFICES]}
-              selected={officeFilter}
-              onSelect={(v) => setOfficeFilter(v as Office | 'All')}
-            />
-          </View>
+
         </View>
       )}
 

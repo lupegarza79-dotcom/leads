@@ -12,10 +12,53 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { ChevronDown, ChevronUp, Clock } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
-import { UI_OFFICES, LEAD_SOURCES } from '@/constants/config';
-import type { Office, LeadSource } from '@/constants/config';
+import { LEAD_SOURCES } from '@/constants/config';
+import type { LeadSource } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
+import { addBusinessDays, getNextBusinessOpen, isWithinBusinessHours } from '@/utils/business-hours';
+
+function getQuickFollowUpOptions(): { label: string; value: Date }[] {
+  const now = new Date();
+  const options: { label: string; value: Date }[] = [];
+
+  if (isWithinBusinessHours(now)) {
+    const laterToday = new Date(now);
+    laterToday.setHours(15, 0, 0, 0);
+    if (laterToday > now) {
+      options.push({ label: 'Later today 3pm', value: laterToday });
+    }
+  }
+
+  const tomorrow10 = new Date(now);
+  tomorrow10.setDate(tomorrow10.getDate() + 1);
+  tomorrow10.setHours(10, 0, 0, 0);
+  const nextOpen = getNextBusinessOpen(tomorrow10);
+  options.push({ label: 'Tomorrow 10am', value: nextOpen });
+
+  const nextBizDay = addBusinessDays(now, 1);
+  nextBizDay.setHours(10, 0, 0, 0);
+  if (nextBizDay.getTime() !== nextOpen.getTime()) {
+    options.push({ label: 'Next biz day 10am', value: nextBizDay });
+  }
+
+  const twoBizDays = addBusinessDays(now, 2);
+  twoBizDays.setHours(10, 0, 0, 0);
+  options.push({ label: 'In 2 biz days', value: twoBizDays });
+
+  return options;
+}
+
+function formatPickerDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 export default function AddLeadScreen() {
   const router = useRouter();
@@ -24,12 +67,13 @@ export default function AddLeadScreen() {
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
-  const [office, setOffice] = useState<Office>('McAllen');
   const [source, setSource] = useState<LeadSource>('WhatsApp');
   const [ownerId, setOwnerId] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
-  const [premium, setPremium] = useState('');
   const [amountDue, setAmountDue] = useState('');
+  const [nextFollowUp, setNextFollowUp] = useState<Date | null>(null);
+  const [notes, setNotes] = useState('');
+
+  const [showOptional, setShowOptional] = useState(false);
   const [downPayment, setDownPayment] = useState('');
   const [monthlyPayment, setMonthlyPayment] = useState('');
   const [totalPremium, setTotalPremium] = useState('');
@@ -41,11 +85,9 @@ export default function AddLeadScreen() {
     return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
   }, [mgUsers]);
 
+  const quickOptions = useMemo(() => getQuickFollowUpOptions(), []);
+
   const handleSubmit = useCallback(async () => {
-    if (!fullName.trim()) {
-      Alert.alert('Required', 'Please enter the lead\'s full name.');
-      return;
-    }
     if (!phone.trim()) {
       Alert.alert('Required', 'Please enter a phone number.');
       return;
@@ -56,14 +98,14 @@ export default function AddLeadScreen() {
     console.log('[AddLead] Submitting lead...');
     try {
       await addLead({
-        full_name: fullName.trim(),
+        full_name: fullName.trim() || phone.trim(),
         phone: phone.trim(),
-        office,
+        office: 'McAllen',
         source,
         owner_id: ownerId,
         notes: notes.trim() || undefined,
-        premium_amount: premium ? parseFloat(premium) : undefined,
         amount_due: amountDue ? parseFloat(amountDue) : undefined,
+        next_followup_at: nextFollowUp ? nextFollowUp.toISOString() : undefined,
         down_payment: downPayment ? parseFloat(downPayment) : undefined,
         monthly_payment: monthlyPayment ? parseFloat(monthlyPayment) : undefined,
         total_premium: totalPremium ? parseFloat(totalPremium) : undefined,
@@ -78,9 +120,8 @@ export default function AddLeadScreen() {
       Alert.alert('Error', e?.message ?? 'Failed to create lead. Please try again.');
     } finally {
       setIsSubmitting(false);
-      console.log('[AddLead] Submit flow finished, loading reset');
     }
-  }, [fullName, phone, office, source, ownerId, notes, premium, amountDue, downPayment, monthlyPayment, totalPremium, quotePrice, carrier, effectiveDate, addLead, router, isSubmitting]);
+  }, [fullName, phone, source, ownerId, notes, amountDue, nextFollowUp, downPayment, monthlyPayment, totalPremium, quotePrice, carrier, effectiveDate, addLead, router, isSubmitting]);
 
   return (
     <KeyboardAvoidingView
@@ -94,19 +135,7 @@ export default function AddLeadScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Contact Info</Text>
-          <View style={styles.field}>
-            <Text style={styles.label}>Full Name *</Text>
-            <TextInput
-              style={styles.input}
-              value={fullName}
-              onChangeText={setFullName}
-              placeholder="e.g. Maria Garcia"
-              placeholderTextColor={Colors.textTertiary}
-              autoFocus
-              testID="input-fullname"
-            />
-          </View>
+          <Text style={styles.sectionTitle}>Contact</Text>
           <View style={styles.field}>
             <Text style={styles.label}>Phone *</Text>
             <TextInput
@@ -116,27 +145,71 @@ export default function AddLeadScreen() {
               placeholder="(956) 555-0123"
               placeholderTextColor={Colors.textTertiary}
               keyboardType="phone-pad"
+              autoFocus
               testID="input-phone"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Full Name</Text>
+            <TextInput
+              style={styles.input}
+              value={fullName}
+              onChangeText={setFullName}
+              placeholder="e.g. Maria Garcia"
+              placeholderTextColor={Colors.textTertiary}
+              testID="input-fullname"
             />
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Assignment</Text>
+          <Text style={styles.sectionTitle}>Amount & Follow-up</Text>
           <View style={styles.field}>
-            <Text style={styles.label}>Office</Text>
-            <View style={styles.chipRow}>
-              {UI_OFFICES.map(o => (
-                <TouchableOpacity
-                  key={o}
-                  style={[styles.chip, office === o && styles.chipActive]}
-                  onPress={() => setOffice(o as Office)}
-                >
-                  <Text style={[styles.chipText, office === o && styles.chipTextActive]}>{o}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Text style={styles.label}>Le quedó en (Amount Due)</Text>
+            <TextInput
+              style={styles.input}
+              value={amountDue}
+              onChangeText={setAmountDue}
+              placeholder="$0"
+              placeholderTextColor={Colors.textTertiary}
+              keyboardType="numeric"
+              testID="input-amount-due"
+            />
           </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Next Follow-up</Text>
+            <View style={styles.quickBtnsRow}>
+              {quickOptions.map((opt, idx) => {
+                const isActive = nextFollowUp?.getTime() === opt.value.getTime();
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.quickBtn, isActive && styles.quickBtnActive]}
+                    onPress={() => setNextFollowUp(isActive ? null : opt.value)}
+                  >
+                    <Clock size={12} color={isActive ? Colors.primary : Colors.textTertiary} />
+                    <Text style={[styles.quickBtnText, isActive && styles.quickBtnTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {nextFollowUp && (
+              <View style={styles.selectedFollowUp}>
+                <Text style={styles.selectedFollowUpText}>
+                  {formatPickerDate(nextFollowUp)}
+                </Text>
+                <TouchableOpacity onPress={() => setNextFollowUp(null)}>
+                  <Text style={styles.clearBtn}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Assignment</Text>
           <View style={styles.field}>
             <Text style={styles.label}>Source</Text>
             <View style={styles.chipRow}>
@@ -152,7 +225,7 @@ export default function AddLeadScreen() {
             </View>
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Assigned To (optional)</Text>
+            <Text style={styles.label}>Assigned To</Text>
             <View style={styles.chipRow}>
               <TouchableOpacity
                 style={[styles.chip, ownerId === null && styles.chipActive]}
@@ -174,103 +247,6 @@ export default function AddLeadScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quote / Payment</Text>
-          <View style={styles.field}>
-            <Text style={styles.label}>Le quedó en (Amount Due)</Text>
-            <TextInput
-              style={styles.input}
-              value={amountDue}
-              onChangeText={setAmountDue}
-              placeholder="0"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="numeric"
-              testID="input-amount-due"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Down Payment</Text>
-            <TextInput
-              style={styles.input}
-              value={downPayment}
-              onChangeText={setDownPayment}
-              placeholder="0"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="numeric"
-              testID="input-down-payment"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Monthly Payment</Text>
-            <TextInput
-              style={styles.input}
-              value={monthlyPayment}
-              onChangeText={setMonthlyPayment}
-              placeholder="0"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="numeric"
-              testID="input-monthly-payment"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Total Premium</Text>
-            <TextInput
-              style={styles.input}
-              value={totalPremium}
-              onChangeText={setTotalPremium}
-              placeholder="0"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="numeric"
-              testID="input-total-premium"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Quote Price</Text>
-            <TextInput
-              style={styles.input}
-              value={quotePrice}
-              onChangeText={setQuotePrice}
-              placeholder="0"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="numeric"
-              testID="input-quote-price"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Premium Amount</Text>
-            <TextInput
-              style={styles.input}
-              value={premium}
-              onChangeText={setPremium}
-              placeholder="0"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="numeric"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Carrier</Text>
-            <TextInput
-              style={styles.input}
-              value={carrier}
-              onChangeText={setCarrier}
-              placeholder="e.g. Progressive, State Farm"
-              placeholderTextColor={Colors.textTertiary}
-              testID="input-carrier"
-            />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Effective Date</Text>
-            <TextInput
-              style={styles.input}
-              value={effectiveDate}
-              onChangeText={setEffectiveDate}
-              placeholder="MM/DD/YYYY"
-              placeholderTextColor={Colors.textTertiary}
-              testID="input-effective-date"
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Notes</Text>
           <View style={styles.field}>
             <TextInput
@@ -285,6 +261,94 @@ export default function AddLeadScreen() {
             />
           </View>
         </View>
+
+        <TouchableOpacity
+          style={styles.optionalToggle}
+          onPress={() => setShowOptional(!showOptional)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.optionalToggleText}>Optional Quote Fields</Text>
+          {showOptional ? (
+            <ChevronUp size={18} color={Colors.textTertiary} />
+          ) : (
+            <ChevronDown size={18} color={Colors.textTertiary} />
+          )}
+        </TouchableOpacity>
+
+        {showOptional && (
+          <View style={styles.section}>
+            <View style={styles.field}>
+              <Text style={styles.label}>Down Payment</Text>
+              <TextInput
+                style={styles.input}
+                value={downPayment}
+                onChangeText={setDownPayment}
+                placeholder="0"
+                placeholderTextColor={Colors.textTertiary}
+                keyboardType="numeric"
+                testID="input-down-payment"
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Monthly Payment</Text>
+              <TextInput
+                style={styles.input}
+                value={monthlyPayment}
+                onChangeText={setMonthlyPayment}
+                placeholder="0"
+                placeholderTextColor={Colors.textTertiary}
+                keyboardType="numeric"
+                testID="input-monthly-payment"
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Total Premium</Text>
+              <TextInput
+                style={styles.input}
+                value={totalPremium}
+                onChangeText={setTotalPremium}
+                placeholder="0"
+                placeholderTextColor={Colors.textTertiary}
+                keyboardType="numeric"
+                testID="input-total-premium"
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Quote Price</Text>
+              <TextInput
+                style={styles.input}
+                value={quotePrice}
+                onChangeText={setQuotePrice}
+                placeholder="0"
+                placeholderTextColor={Colors.textTertiary}
+                keyboardType="numeric"
+                testID="input-quote-price"
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Carrier</Text>
+              <TextInput
+                style={styles.input}
+                value={carrier}
+                onChangeText={setCarrier}
+                placeholder="e.g. Progressive, State Farm"
+                placeholderTextColor={Colors.textTertiary}
+                testID="input-carrier"
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Effective Date</Text>
+              <TextInput
+                style={styles.input}
+                value={effectiveDate}
+                onChangeText={setEffectiveDate}
+                placeholder="MM/DD/YYYY"
+                placeholderTextColor={Colors.textTertiary}
+                testID="input-effective-date"
+              />
+            </View>
+          </View>
+        )}
 
         <TouchableOpacity
           style={[styles.submitBtn, isSubmitting && styles.submitBtnDisabled]}
@@ -376,6 +440,73 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: Colors.primary,
+  },
+  quickBtnsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  quickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  quickBtnActive: {
+    backgroundColor: Colors.primaryMuted,
+    borderColor: Colors.primary,
+  },
+  quickBtnText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '500' as const,
+  },
+  quickBtnTextActive: {
+    color: Colors.primary,
+  },
+  selectedFollowUp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: Colors.primaryMuted,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.primary + '33',
+  },
+  selectedFollowUpText: {
+    color: Colors.primary,
+    fontSize: 13,
+    fontWeight: '600' as const,
+  },
+  clearBtn: {
+    color: Colors.textTertiary,
+    fontSize: 12,
+    fontWeight: '500' as const,
+  },
+  optionalToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  optionalToggleText: {
+    color: Colors.textTertiary,
+    fontSize: 13,
+    fontWeight: '600' as const,
   },
   submitBtn: {
     backgroundColor: Colors.primary,

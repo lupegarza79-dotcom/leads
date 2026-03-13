@@ -75,6 +75,7 @@ export interface LeadCreateInput {
   premium_amount?: number;
   phone_norm?: string;
   amount_due?: number;
+  next_followup_at?: string;
   down_payment?: number;
   monthly_payment?: number;
   total_premium?: number;
