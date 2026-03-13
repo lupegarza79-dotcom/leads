@@ -282,6 +282,13 @@ export default function LeadDetailScreen() {
             {lead.closed_at && <DetailRow icon={<CheckCircle size={14} color={Colors.success} />} label="Closed" value={formatDateTime(lead.closed_at)} />}
             {lead.next_followup_at && <DetailRow icon={<Calendar size={14} color={Colors.warning} />} label="Next Follow-up" value={formatDateTime(lead.next_followup_at)} />}
             {lead.premium_amount != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Premium" value={formatCurrency(lead.premium_amount)} />}
+            {lead.amount_due != null && <DetailRow icon={<DollarSign size={14} color={Colors.primary} />} label="Le quedó en" value={formatCurrency(lead.amount_due)} />}
+            {lead.down_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.info} />} label="Down Payment" value={formatCurrency(lead.down_payment)} />}
+            {lead.monthly_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.warning} />} label="Monthly" value={formatCurrency(lead.monthly_payment)} />}
+            {lead.total_premium != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Total Premium" value={formatCurrency(lead.total_premium)} />}
+            {lead.quote_price != null && <DetailRow icon={<DollarSign size={14} color={Colors.cyan} />} label="Quote Price" value={formatCurrency(lead.quote_price)} />}
+            {lead.carrier && <DetailRow icon={<FileText size={14} color={Colors.textTertiary} />} label="Carrier" value={lead.carrier} />}
+            {lead.effective_date && <DetailRow icon={<Calendar size={14} color={Colors.success} />} label="Effective Date" value={lead.effective_date} />}
             {lead.renewal_date && <DetailRow icon={<Calendar size={14} color={Colors.info} />} label="Renewal" value={formatDate(lead.renewal_date)} />}
             {lead.notes ? (
               <View style={styles.notesBox}>

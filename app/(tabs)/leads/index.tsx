@@ -10,7 +10,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Search, Plus, Filter, X, Users } from 'lucide-react-native';
 import { Colors, StatusColors } from '@/constants/colors';
-import { PIPELINE_STATUSES, OFFICES } from '@/constants/config';
+import { PIPELINE_STATUSES, UI_OFFICES } from '@/constants/config';
 import type { PipelineStatus, Office } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { LeadCard } from '@/components/LeadCard';
@@ -110,7 +110,7 @@ export default function LeadsScreen() {
           <View style={isWide ? styles.filterGroupWide : undefined}>
             <Text style={[styles.filterLabel, !isWide && { marginTop: 10 }]}>Office</Text>
             <ScrollableChips
-              items={['All', ...OFFICES]}
+              items={['All', ...UI_OFFICES]}
               selected={officeFilter}
               onSelect={(v) => setOfficeFilter(v as Office | 'All')}
             />

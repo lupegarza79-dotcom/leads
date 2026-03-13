@@ -1,6 +1,8 @@
 export const OFFICES = ['McAllen', 'San Juan', 'Other'] as const;
 export type Office = (typeof OFFICES)[number];
 
+export const UI_OFFICES = ['McAllen', 'Other'] as const;
+
 export const LEAD_SOURCES = ['WhatsApp', 'Call', 'FB', 'Referral', 'Other'] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 

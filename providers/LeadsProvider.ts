@@ -179,9 +179,11 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
     mutationFn: async (input: LeadCreateInput) => {
       console.log('[LeadsEngine] addLead mutationFn called with:', input.full_name);
       const now = new Date().toISOString();
+      const phoneNorm = input.phone.replace(/\D/g, '');
       const newLead = {
         full_name: input.full_name,
         phone: input.phone,
+        phone_norm: phoneNorm,
         email: input.email ?? null,
         office: input.office,
         source: input.source,
@@ -195,6 +197,13 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         renewal_date: null,
         premium_amount: input.premium_amount ?? null,
         commission_estimate: null,
+        amount_due: input.amount_due ?? null,
+        down_payment: input.down_payment ?? null,
+        monthly_payment: input.monthly_payment ?? null,
+        total_premium: input.total_premium ?? null,
+        quote_price: input.quote_price ?? null,
+        carrier: input.carrier ?? null,
+        effective_date: input.effective_date ?? null,
       };
 
       console.log('[Supabase] Inserting into mg_leads...');

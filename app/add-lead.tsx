@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/colors';
-import { OFFICES, LEAD_SOURCES } from '@/constants/config';
+import { UI_OFFICES, LEAD_SOURCES } from '@/constants/config';
 import type { Office, LeadSource } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 
@@ -24,12 +24,18 @@ export default function AddLeadScreen() {
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
   const [office, setOffice] = useState<Office>('McAllen');
   const [source, setSource] = useState<LeadSource>('WhatsApp');
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [premium, setPremium] = useState('');
+  const [amountDue, setAmountDue] = useState('');
+  const [downPayment, setDownPayment] = useState('');
+  const [monthlyPayment, setMonthlyPayment] = useState('');
+  const [totalPremium, setTotalPremium] = useState('');
+  const [quotePrice, setQuotePrice] = useState('');
+  const [carrier, setCarrier] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState('');
 
   const assignableUsers = useMemo(() => {
     return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
@@ -52,12 +58,18 @@ export default function AddLeadScreen() {
       await addLead({
         full_name: fullName.trim(),
         phone: phone.trim(),
-        email: email.trim() || undefined,
         office,
         source,
         owner_id: ownerId,
         notes: notes.trim() || undefined,
         premium_amount: premium ? parseFloat(premium) : undefined,
+        amount_due: amountDue ? parseFloat(amountDue) : undefined,
+        down_payment: downPayment ? parseFloat(downPayment) : undefined,
+        monthly_payment: monthlyPayment ? parseFloat(monthlyPayment) : undefined,
+        total_premium: totalPremium ? parseFloat(totalPremium) : undefined,
+        quote_price: quotePrice ? parseFloat(quotePrice) : undefined,
+        carrier: carrier.trim() || undefined,
+        effective_date: effectiveDate.trim() || undefined,
       });
       console.log('[AddLead] Lead created successfully');
       router.back();
@@ -68,7 +80,7 @@ export default function AddLeadScreen() {
       setIsSubmitting(false);
       console.log('[AddLead] Submit flow finished, loading reset');
     }
-  }, [fullName, phone, email, office, source, ownerId, notes, premium, addLead, router, isSubmitting]);
+  }, [fullName, phone, office, source, ownerId, notes, premium, amountDue, downPayment, monthlyPayment, totalPremium, quotePrice, carrier, effectiveDate, addLead, router, isSubmitting]);
 
   return (
     <KeyboardAvoidingView
@@ -107,18 +119,6 @@ export default function AddLeadScreen() {
               testID="input-phone"
             />
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="email@example.com"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          </View>
         </View>
 
         <View style={styles.section}>
@@ -126,11 +126,11 @@ export default function AddLeadScreen() {
           <View style={styles.field}>
             <Text style={styles.label}>Office</Text>
             <View style={styles.chipRow}>
-              {OFFICES.map(o => (
+              {UI_OFFICES.map(o => (
                 <TouchableOpacity
                   key={o}
                   style={[styles.chip, office === o && styles.chipActive]}
-                  onPress={() => setOffice(o)}
+                  onPress={() => setOffice(o as Office)}
                 >
                   <Text style={[styles.chipText, office === o && styles.chipTextActive]}>{o}</Text>
                 </TouchableOpacity>
@@ -174,7 +174,67 @@ export default function AddLeadScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Details</Text>
+          <Text style={styles.sectionTitle}>Quote / Payment</Text>
+          <View style={styles.field}>
+            <Text style={styles.label}>Le quedó en (Amount Due)</Text>
+            <TextInput
+              style={styles.input}
+              value={amountDue}
+              onChangeText={setAmountDue}
+              placeholder="0"
+              placeholderTextColor={Colors.textTertiary}
+              keyboardType="numeric"
+              testID="input-amount-due"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Down Payment</Text>
+            <TextInput
+              style={styles.input}
+              value={downPayment}
+              onChangeText={setDownPayment}
+              placeholder="0"
+              placeholderTextColor={Colors.textTertiary}
+              keyboardType="numeric"
+              testID="input-down-payment"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Monthly Payment</Text>
+            <TextInput
+              style={styles.input}
+              value={monthlyPayment}
+              onChangeText={setMonthlyPayment}
+              placeholder="0"
+              placeholderTextColor={Colors.textTertiary}
+              keyboardType="numeric"
+              testID="input-monthly-payment"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Total Premium</Text>
+            <TextInput
+              style={styles.input}
+              value={totalPremium}
+              onChangeText={setTotalPremium}
+              placeholder="0"
+              placeholderTextColor={Colors.textTertiary}
+              keyboardType="numeric"
+              testID="input-total-premium"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Quote Price</Text>
+            <TextInput
+              style={styles.input}
+              value={quotePrice}
+              onChangeText={setQuotePrice}
+              placeholder="0"
+              placeholderTextColor={Colors.textTertiary}
+              keyboardType="numeric"
+              testID="input-quote-price"
+            />
+          </View>
           <View style={styles.field}>
             <Text style={styles.label}>Premium Amount</Text>
             <TextInput
@@ -187,7 +247,32 @@ export default function AddLeadScreen() {
             />
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Notes</Text>
+            <Text style={styles.label}>Carrier</Text>
+            <TextInput
+              style={styles.input}
+              value={carrier}
+              onChangeText={setCarrier}
+              placeholder="e.g. Progressive, State Farm"
+              placeholderTextColor={Colors.textTertiary}
+              testID="input-carrier"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Effective Date</Text>
+            <TextInput
+              style={styles.input}
+              value={effectiveDate}
+              onChangeText={setEffectiveDate}
+              placeholder="MM/DD/YYYY"
+              placeholderTextColor={Colors.textTertiary}
+              testID="input-effective-date"
+            />
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Notes</Text>
+          <View style={styles.field}>
             <TextInput
               style={[styles.input, styles.textArea]}
               value={notes}

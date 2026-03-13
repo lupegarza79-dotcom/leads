@@ -18,6 +18,14 @@ export interface Lead {
   renewal_date: string | null;
   premium_amount: number | null;
   commission_estimate: number | null;
+  phone_norm: string | null;
+  amount_due: number | null;
+  down_payment: number | null;
+  monthly_payment: number | null;
+  total_premium: number | null;
+  quote_price: number | null;
+  carrier: string | null;
+  effective_date: string | null;
 }
 
 export interface ActivityLogEntry {
@@ -65,6 +73,14 @@ export interface LeadCreateInput {
   owner_id?: string | null;
   notes?: string;
   premium_amount?: number;
+  phone_norm?: string;
+  amount_due?: number;
+  down_payment?: number;
+  monthly_payment?: number;
+  total_premium?: number;
+  quote_price?: number;
+  carrier?: string;
+  effective_date?: string;
 }
 
 export interface DashboardMetrics {
