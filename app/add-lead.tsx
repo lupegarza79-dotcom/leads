@@ -82,6 +82,18 @@ export default function AddLeadScreen() {
       Alert.alert('Required', 'Please enter a phone number.');
       return;
     }
+    if (!fullName.trim()) {
+      Alert.alert('Required', 'Please enter a full name.');
+      return;
+    }
+    if (!amountDue.trim()) {
+      Alert.alert('Required', 'Please enter the amount due.');
+      return;
+    }
+    if (!nextFollowUp) {
+      Alert.alert('Required', 'Please select a follow-up date.');
+      return;
+    }
     if (isSubmitting) return;
 
     setIsSubmitting(true);
@@ -146,7 +158,7 @@ export default function AddLeadScreen() {
             />
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Full Name</Text>
+            <Text style={styles.label}>Full Name *</Text>
             <TextInput
               style={styles.input}
               value={fullName}
@@ -161,7 +173,7 @@ export default function AddLeadScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Amount & Follow-up</Text>
           <View style={styles.field}>
-            <Text style={styles.label}>Le quedó en (Amount Due)</Text>
+            <Text style={styles.label}>Amount Due *</Text>
             <TextInput
               style={styles.input}
               value={amountDue}
@@ -173,7 +185,7 @@ export default function AddLeadScreen() {
             />
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Next Follow-up</Text>
+            <Text style={styles.label}>Next Follow-up *</Text>
             <View style={styles.quickBtnsRow}>
               {quickOptions.map((opt, idx) => {
                 const isActive = nextFollowUp?.getTime() === opt.value.getTime();

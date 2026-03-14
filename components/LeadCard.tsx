@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Phone, Clock, AlertTriangle } from 'lucide-react-native';
+import { Phone, Clock, AlertTriangle, MessageCircle, CalendarPlus } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { StatusBadge } from './StatusBadge';
 import { formatRelativeTime, formatPhone } from '@/utils/formatters';
@@ -13,9 +13,21 @@ interface LeadCardProps {
   onPress: (id: string) => void;
   compact?: boolean;
   ownerName?: string | null;
+  onMarkContacted?: (id: string) => void;
+  onSetFollowUp?: (id: string) => void;
+  showQuickActions?: boolean;
 }
 
-export const LeadCard = React.memo(function LeadCard({ lead, followUps, onPress, compact, ownerName }: LeadCardProps) {
+export const LeadCard = React.memo(function LeadCard({
+  lead,
+  followUps,
+  onPress,
+  compact,
+  ownerName,
+  onMarkContacted,
+  onSetFollowUp,
+  showQuickActions,
+}: LeadCardProps) {
   const slaStatus = getLeadSLAStatus(lead, followUps);
 
   const borderColor = slaStatus === 'escalated'
@@ -23,6 +35,9 @@ export const LeadCard = React.memo(function LeadCard({ lead, followUps, onPress,
     : slaStatus === 'critical'
     ? Colors.warning
     : Colors.border;
+
+  const canMarkContacted = lead.status === 'New';
+  const showActions = showQuickActions && (canMarkContacted || onSetFollowUp);
 
   return (
     <TouchableOpacity
@@ -62,6 +77,39 @@ export const LeadCard = React.memo(function LeadCard({ lead, followUps, onPress,
 
       {lead.premium_amount != null && !compact && (
         <Text style={styles.premium}>${lead.premium_amount.toLocaleString()}</Text>
+      )}
+
+      {showActions && (
+        <View style={styles.actionsRow}>
+          {canMarkContacted && onMarkContacted && (
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                onMarkContacted(lead.id);
+              }}
+              activeOpacity={0.7}
+              testID={`mark-contacted-${lead.id}`}
+            >
+              <MessageCircle size={12} color={Colors.cyan} />
+              <Text style={styles.actionBtnText}>Mark Contacted</Text>
+            </TouchableOpacity>
+          )}
+          {onSetFollowUp && lead.status !== 'Closed' && lead.status !== 'Lost' && (
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.actionBtnFollowUp]}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                onSetFollowUp(lead.id);
+              }}
+              activeOpacity={0.7}
+              testID={`set-followup-${lead.id}`}
+            >
+              <CalendarPlus size={12} color={Colors.warning} />
+              <Text style={[styles.actionBtnText, styles.actionBtnTextFollowUp]}>+1 Biz Day</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       )}
     </TouchableOpacity>
   );
@@ -133,5 +181,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700' as const,
     marginTop: 8,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.cyanMuted,
+    borderWidth: 1,
+    borderColor: Colors.cyan + '33',
+  },
+  actionBtnFollowUp: {
+    backgroundColor: Colors.warningMuted,
+    borderColor: Colors.warning + '33',
+  },
+  actionBtnText: {
+    color: Colors.cyan,
+    fontSize: 11,
+    fontWeight: '700' as const,
+  },
+  actionBtnTextFollowUp: {
+    color: Colors.warning,
   },
 });

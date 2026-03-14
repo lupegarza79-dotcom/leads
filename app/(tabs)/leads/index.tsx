@@ -6,6 +6,7 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, Plus, Filter, X, Users } from 'lucide-react-native';
@@ -13,14 +14,17 @@ import { Colors, StatusColors } from '@/constants/colors';
 import { PIPELINE_STATUSES } from '@/constants/config';
 import type { PipelineStatus } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
+import { useAuth } from '@/providers/AuthProvider';
 import { LeadCard } from '@/components/LeadCard';
 import { EmptyState } from '@/components/EmptyState';
 import { useResponsive } from '@/hooks/useResponsive';
+import { addBusinessDays } from '@/utils/business-hours';
 import type { Lead } from '@/types/leads';
 
 export default function LeadsScreen() {
   const router = useRouter();
-  const { leads, followUps, getUserById } = useLeads();
+  const { leads, followUps, getUserById, changeStatus, updateLead, addActivity } = useLeads();
+  const { appUser } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | 'All'>('All');
 
@@ -47,6 +51,34 @@ export default function LeadsScreen() {
     router.push(`/lead/${id}`);
   }, [router]);
 
+  const handleMarkContacted = useCallback(async (id: string) => {
+    try {
+      await changeStatus({ id, status: 'Contacted', userId: appUser?.id ?? 'system' });
+      Alert.alert('Done', 'Lead marked as Contacted.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Failed to update lead.');
+    }
+  }, [changeStatus, appUser]);
+
+  const handleSetFollowUp = useCallback(async (id: string) => {
+    try {
+      const nextBizDay = addBusinessDays(new Date(), 1);
+      nextBizDay.setHours(10, 0, 0, 0);
+      await updateLead({ id, updates: { next_followup_at: nextBizDay.toISOString() } });
+      if (appUser?.id) {
+        await addActivity({
+          lead_id: id,
+          user_id: appUser.id,
+          type: 'note',
+          note: `Follow-up set to ${nextBizDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} 10:00 AM`,
+        });
+      }
+      Alert.alert('Done', 'Follow-up set for next business day 10am.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Failed to set follow-up.');
+    }
+  }, [updateLead, addActivity, appUser]);
+
   const renderItem = useCallback(({ item }: { item: Lead }) => (
     <View style={isWide ? listStyles.wideItem : undefined}>
       <LeadCard
@@ -54,9 +86,12 @@ export default function LeadsScreen() {
         followUps={followUps}
         onPress={handlePress}
         ownerName={getUserById(item.owner_id)?.name ?? null}
+        showQuickActions
+        onMarkContacted={handleMarkContacted}
+        onSetFollowUp={handleSetFollowUp}
       />
     </View>
-  ), [followUps, handlePress, isWide, getUserById]);
+  ), [followUps, handlePress, isWide, getUserById, handleMarkContacted, handleSetFollowUp]);
 
   return (
     <View style={styles.container}>

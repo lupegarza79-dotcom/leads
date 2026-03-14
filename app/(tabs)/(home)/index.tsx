@@ -5,18 +5,22 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Plus, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { Colors, StatusColors } from '@/constants/colors';
 import { PIPELINE_STATUSES } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
+import { useAuth } from '@/providers/AuthProvider';
 import { LeadCard } from '@/components/LeadCard';
 import { useResponsive } from '@/hooks/useResponsive';
+import { addBusinessDays } from '@/utils/business-hours';
 
 export default function PipelineScreen() {
   const router = useRouter();
-  const { followUps, getLeadsByStatus, getUserById } = useLeads();
+  const { followUps, getLeadsByStatus, getUserById, changeStatus, updateLead, addActivity } = useLeads();
+  const { appUser } = useAuth();
   const [activeColumnIndex, setActiveColumnIndex] = useState(0);
   const { width, isWide, isDesktop } = useResponsive();
 
@@ -28,6 +32,38 @@ export default function PipelineScreen() {
   const handleLeadPress = useCallback((id: string) => {
     router.push(`/lead/${id}`);
   }, [router]);
+
+  const handleMarkContacted = useCallback(async (id: string) => {
+    try {
+      console.log('[Pipeline] Mark Contacted:', id);
+      await changeStatus({ id, status: 'Contacted', userId: appUser?.id ?? 'system' });
+      Alert.alert('Done', 'Lead marked as Contacted.');
+    } catch (e: any) {
+      console.log('[Pipeline] Error marking contacted:', e?.message);
+      Alert.alert('Error', e?.message ?? 'Failed to update lead.');
+    }
+  }, [changeStatus, appUser]);
+
+  const handleSetFollowUp = useCallback(async (id: string) => {
+    try {
+      console.log('[Pipeline] Set Follow-up +1 biz day:', id);
+      const nextBizDay = addBusinessDays(new Date(), 1);
+      nextBizDay.setHours(10, 0, 0, 0);
+      await updateLead({ id, updates: { next_followup_at: nextBizDay.toISOString() } });
+      if (appUser?.id) {
+        await addActivity({
+          lead_id: id,
+          user_id: appUser.id,
+          type: 'note',
+          note: `Follow-up set to ${nextBizDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} 10:00 AM`,
+        });
+      }
+      Alert.alert('Done', 'Follow-up set for next business day 10am.');
+    } catch (e: any) {
+      console.log('[Pipeline] Error setting follow-up:', e?.message);
+      Alert.alert('Error', e?.message ?? 'Failed to set follow-up.');
+    }
+  }, [updateLead, addActivity, appUser]);
 
   const visibleCount = isDesktop ? activeStatuses.length : isWide ? 3 : 1;
   const columnWidth = isDesktop
@@ -145,6 +181,9 @@ export default function PipelineScreen() {
                       onPress={handleLeadPress}
                       ownerName={getUserById(lead.owner_id)?.name ?? null}
                       compact
+                      showQuickActions
+                      onMarkContacted={handleMarkContacted}
+                      onSetFollowUp={handleSetFollowUp}
                     />
                   ))
                 )}
