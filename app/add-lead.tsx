@@ -17,35 +17,28 @@ import { Colors } from '@/constants/colors';
 import { LEAD_SOURCES } from '@/constants/config';
 import type { LeadSource } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
-import { addBusinessDays, getNextBusinessOpen, isWithinBusinessHours } from '@/utils/business-hours';
+import { addBusinessDays } from '@/utils/business-hours';
 
 function getQuickFollowUpOptions(): { label: string; value: Date }[] {
   const now = new Date();
   const options: { label: string; value: Date }[] = [];
 
-  if (isWithinBusinessHours(now)) {
-    const laterToday = new Date(now);
-    laterToday.setHours(15, 0, 0, 0);
-    if (laterToday > now) {
-      options.push({ label: 'Later today 3pm', value: laterToday });
-    }
+  const today3pm = new Date(now);
+  today3pm.setHours(15, 0, 0, 0);
+  if (today3pm > now) {
+    options.push({ label: 'Today 3pm', value: today3pm });
   }
 
   const tomorrow10 = new Date(now);
   tomorrow10.setDate(tomorrow10.getDate() + 1);
   tomorrow10.setHours(10, 0, 0, 0);
-  const nextOpen = getNextBusinessOpen(tomorrow10);
-  options.push({ label: 'Tomorrow 10am', value: nextOpen });
+  options.push({ label: 'Tomorrow 10am', value: tomorrow10 });
 
   const nextBizDay = addBusinessDays(now, 1);
   nextBizDay.setHours(10, 0, 0, 0);
-  if (nextBizDay.getTime() !== nextOpen.getTime()) {
+  if (nextBizDay.getTime() !== tomorrow10.getTime()) {
     options.push({ label: 'Next biz day 10am', value: nextBizDay });
   }
-
-  const twoBizDays = addBusinessDays(now, 2);
-  twoBizDays.setHours(10, 0, 0, 0);
-  options.push({ label: 'In 2 biz days', value: twoBizDays });
 
   return options;
 }
@@ -76,10 +69,7 @@ export default function AddLeadScreen() {
   const [showOptional, setShowOptional] = useState(false);
   const [downPayment, setDownPayment] = useState('');
   const [monthlyPayment, setMonthlyPayment] = useState('');
-  const [totalPremium, setTotalPremium] = useState('');
-  const [quotePrice, setQuotePrice] = useState('');
-  const [carrier, setCarrier] = useState('');
-  const [effectiveDate, setEffectiveDate] = useState('');
+
 
   const assignableUsers = useMemo(() => {
     return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
@@ -108,10 +98,7 @@ export default function AddLeadScreen() {
         next_followup_at: nextFollowUp ? nextFollowUp.toISOString() : undefined,
         down_payment: downPayment ? parseFloat(downPayment) : undefined,
         monthly_payment: monthlyPayment ? parseFloat(monthlyPayment) : undefined,
-        total_premium: totalPremium ? parseFloat(totalPremium) : undefined,
-        quote_price: quotePrice ? parseFloat(quotePrice) : undefined,
-        carrier: carrier.trim() || undefined,
-        effective_date: effectiveDate.trim() || undefined,
+        total_premium: (downPayment && monthlyPayment) ? parseFloat(downPayment) + parseFloat(monthlyPayment) : undefined,
       });
       if (result.wasUpdated) {
         console.log('[AddLead] Existing lead updated via phone match');
@@ -130,7 +117,7 @@ export default function AddLeadScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [fullName, phone, source, ownerId, notes, amountDue, nextFollowUp, downPayment, monthlyPayment, totalPremium, quotePrice, carrier, effectiveDate, addLead, router, isSubmitting]);
+  }, [fullName, phone, source, ownerId, notes, amountDue, nextFollowUp, downPayment, monthlyPayment, addLead, router, isSubmitting]);
 
   return (
     <KeyboardAvoidingView
@@ -276,7 +263,7 @@ export default function AddLeadScreen() {
           onPress={() => setShowOptional(!showOptional)}
           activeOpacity={0.7}
         >
-          <Text style={styles.optionalToggleText}>Optional Quote Fields</Text>
+          <Text style={styles.optionalToggleText}>Optional Quote Details</Text>
           {showOptional ? (
             <ChevronUp size={18} color={Colors.textTertiary} />
           ) : (
@@ -310,52 +297,14 @@ export default function AddLeadScreen() {
                 testID="input-monthly-payment"
               />
             </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Total Premium</Text>
-              <TextInput
-                style={styles.input}
-                value={totalPremium}
-                onChangeText={setTotalPremium}
-                placeholder="0"
-                placeholderTextColor={Colors.textTertiary}
-                keyboardType="numeric"
-                testID="input-total-premium"
-              />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Quote Price</Text>
-              <TextInput
-                style={styles.input}
-                value={quotePrice}
-                onChangeText={setQuotePrice}
-                placeholder="0"
-                placeholderTextColor={Colors.textTertiary}
-                keyboardType="numeric"
-                testID="input-quote-price"
-              />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Carrier</Text>
-              <TextInput
-                style={styles.input}
-                value={carrier}
-                onChangeText={setCarrier}
-                placeholder="e.g. Progressive, State Farm"
-                placeholderTextColor={Colors.textTertiary}
-                testID="input-carrier"
-              />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Effective Date</Text>
-              <TextInput
-                style={styles.input}
-                value={effectiveDate}
-                onChangeText={setEffectiveDate}
-                placeholder="MM/DD/YYYY"
-                placeholderTextColor={Colors.textTertiary}
-                testID="input-effective-date"
-              />
-            </View>
+            {(downPayment && monthlyPayment) ? (
+              <View style={styles.autoCalcRow}>
+                <Text style={styles.autoCalcLabel}>Total Premium (auto)</Text>
+                <Text style={styles.autoCalcValue}>
+                  ${(parseFloat(downPayment || '0') + parseFloat(monthlyPayment || '0')).toFixed(2)}
+                </Text>
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -536,6 +485,28 @@ const styles = StyleSheet.create({
   submitText: {
     color: Colors.white,
     fontSize: 16,
+    fontWeight: '700' as const,
+  },
+  autoCalcRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: Colors.successMuted,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.success + '33',
+    marginBottom: 8,
+  },
+  autoCalcLabel: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '500' as const,
+  },
+  autoCalcValue: {
+    color: Colors.success,
+    fontSize: 15,
     fontWeight: '700' as const,
   },
   bottomPad: {
