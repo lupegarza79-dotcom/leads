@@ -83,7 +83,7 @@ const defaultLeadsValue = {
     leadsAtRisk: 0, leadsClosed: 0, followUpOverdue: 0,
   } as DashboardMetrics,
   isLoading: true,
-  addLead: async () => ({} as Lead),
+  addLead: async () => ({ lead: {} as Lead, wasUpdated: false }),
   addingLead: false,
   updateLead: async () => ({} as Lead),
   changeStatus: async () => ({} as Lead),
@@ -176,7 +176,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
   }, [queryClient]);
 
   const addLeadMutation = useMutation({
-    mutationFn: async (input: LeadCreateInput) => {
+    mutationFn: async (input: LeadCreateInput): Promise<{ lead: Lead; wasUpdated: boolean }> => {
       console.log('[LeadsEngine] addLead mutationFn called with:', input.full_name);
       const now = new Date().toISOString();
       const phoneNorm = input.phone.replace(/\D/g, '');
@@ -214,6 +214,76 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         .single();
 
       if (leadError) {
+        const isDuplicate = leadError.message?.includes('uq_mg_leads_phone_norm')
+          || leadError.message?.includes('duplicate key')
+          || leadError.message?.includes('unique constraint')
+          || leadError.code === '23505';
+
+        if (isDuplicate) {
+          console.log('[LeadsEngine] Duplicate phone_norm detected, updating existing lead...');
+
+          const { data: existingLeads, error: fetchError } = await supabase
+            .from('mg_leads')
+            .select('*')
+            .eq('phone_norm', phoneNorm)
+            .limit(1);
+
+          if (fetchError || !existingLeads || existingLeads.length === 0) {
+            console.log('[Supabase] Error fetching existing lead by phone_norm:', fetchError?.message);
+            throw new Error('Duplicate phone found but could not fetch existing lead.');
+          }
+
+          const existing = existingLeads[0];
+          console.log('[LeadsEngine] Found existing lead:', existing.id, existing.full_name);
+
+          const updateFields: Record<string, unknown> = {
+            last_touch_at: now,
+          };
+          if (input.full_name && input.full_name !== input.phone) updateFields.full_name = input.full_name;
+          if (input.owner_id !== undefined) updateFields.owner_id = input.owner_id;
+          if (input.notes) updateFields.notes = input.notes;
+          if (input.amount_due !== undefined) updateFields.amount_due = input.amount_due;
+          if (input.next_followup_at) updateFields.next_followup_at = input.next_followup_at;
+          if (input.down_payment !== undefined) updateFields.down_payment = input.down_payment;
+          if (input.monthly_payment !== undefined) updateFields.monthly_payment = input.monthly_payment;
+          if (input.total_premium !== undefined) updateFields.total_premium = input.total_premium;
+          if (input.quote_price !== undefined) updateFields.quote_price = input.quote_price;
+          if (input.carrier) updateFields.carrier = input.carrier;
+          if (input.effective_date) updateFields.effective_date = input.effective_date;
+          if (input.source) updateFields.source = input.source;
+
+          const { data: updatedData, error: updateError } = await supabase
+            .from('mg_leads')
+            .update(updateFields)
+            .eq('id', existing.id)
+            .select()
+            .single();
+
+          if (updateError) {
+            console.log('[Supabase] Error updating existing lead:', updateError.message);
+            throw new Error(`Failed to update existing lead: ${updateError.message}`);
+          }
+
+          console.log('[LeadsEngine] Existing lead updated:', updatedData.id);
+
+          try {
+            if (appUser?.id) {
+              await supabase
+                .from('mg_activity_log')
+                .insert({
+                  lead_id: existing.id,
+                  user_id: appUser.id,
+                  type: 'note',
+                  note: 'Updated existing lead via phone match',
+                });
+            }
+          } catch (activityErr) {
+            console.log('[Supabase] Non-critical: activity log for update threw:', activityErr);
+          }
+
+          return { lead: updatedData as Lead, wasUpdated: true };
+        }
+
         console.log('[Supabase] Error creating lead:', leadError.message, leadError.code, leadError.details);
         throw new Error(`Failed to create lead: ${leadError.message}`);
       }
@@ -247,7 +317,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
       }
 
       console.log(`[LeadsEngine] Lead created: ${leadData.full_name} (${leadData.id})`);
-      return leadData as Lead;
+      return { lead: leadData as Lead, wasUpdated: false };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });

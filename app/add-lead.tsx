@@ -97,7 +97,7 @@ export default function AddLeadScreen() {
     setIsSubmitting(true);
     console.log('[AddLead] Submitting lead...');
     try {
-      await addLead({
+      const result = await addLead({
         full_name: fullName.trim() || phone.trim(),
         phone: phone.trim(),
         office: 'McAllen',
@@ -113,8 +113,17 @@ export default function AddLeadScreen() {
         carrier: carrier.trim() || undefined,
         effective_date: effectiveDate.trim() || undefined,
       });
-      console.log('[AddLead] Lead created successfully');
-      router.back();
+      if (result.wasUpdated) {
+        console.log('[AddLead] Existing lead updated via phone match');
+        Alert.alert(
+          'Lead Updated',
+          'Existing lead found. Updated instead of creating duplicate.',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      } else {
+        console.log('[AddLead] Lead created successfully');
+        router.back();
+      }
     } catch (e: any) {
       console.log('[AddLead] Error creating lead:', e?.message ?? e);
       Alert.alert('Error', e?.message ?? 'Failed to create lead. Please try again.');
