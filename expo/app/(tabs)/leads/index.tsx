@@ -23,16 +23,20 @@ import type { Lead } from '@/types/leads';
 
 export default function LeadsScreen() {
   const router = useRouter();
-  const { leads, followUps, getUserById, changeStatus, updateLead, addActivity } = useLeads();
+  const { leads, followUps, activities, getUserById, changeStatus, updateLead, addActivity } = useLeads();
   const { appUser } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | 'All'>('All');
-
+  const isProducer = appUser?.role === 'producer';
+  const [ownerFilter, setOwnerFilter] = useState<'mine' | 'all'>(isProducer ? 'mine' : 'all');
   const [showFilters, setShowFilters] = useState(false);
   const { isWide } = useResponsive();
 
   const filtered = useMemo(() => {
     let result = leads;
+    if (ownerFilter === 'mine' && appUser?.id) {
+      result = result.filter(l => l.owner_id === appUser.id);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(l =>
@@ -45,7 +49,7 @@ export default function LeadsScreen() {
       result = result.filter(l => l.status === statusFilter);
     }
     return result;
-  }, [leads, search, statusFilter]);
+  }, [leads, search, statusFilter, ownerFilter, appUser?.id]);
 
   const handlePress = useCallback((id: string) => {
     router.push(`/lead/${id}`);
@@ -79,19 +83,25 @@ export default function LeadsScreen() {
     }
   }, [updateLead, addActivity, appUser]);
 
+  const handleOpenComposer = useCallback((id: string) => {
+    router.push(`/follow-up?leadId=${id}`);
+  }, [router]);
+
   const renderItem = useCallback(({ item }: { item: Lead }) => (
     <View style={isWide ? listStyles.wideItem : undefined}>
       <LeadCard
         lead={item}
         followUps={followUps}
+        activities={activities}
         onPress={handlePress}
         ownerName={getUserById(item.owner_id)?.name ?? null}
         showQuickActions
         onMarkContacted={handleMarkContacted}
         onSetFollowUp={handleSetFollowUp}
+        onOpenComposer={handleOpenComposer}
       />
     </View>
-  ), [followUps, handlePress, isWide, getUserById, handleMarkContacted, handleSetFollowUp]);
+  ), [followUps, activities, handlePress, isWide, getUserById, handleMarkContacted, handleSetFollowUp, handleOpenComposer]);
 
   return (
     <View style={styles.container}>
@@ -132,6 +142,23 @@ export default function LeadsScreen() {
       {showFilters && (
         <View style={[styles.filterSection, isWide && styles.filterSectionWide]}>
           <View style={isWide ? styles.filterGroupWide : undefined}>
+            <Text style={styles.filterLabel}>Owner</Text>
+            <View style={chipStyles.row}>
+              <TouchableOpacity
+                style={[chipStyles.chip, ownerFilter === 'mine' && chipStyles.chipActive]}
+                onPress={() => setOwnerFilter('mine')}
+              >
+                <Text style={[chipStyles.chipText, ownerFilter === 'mine' && chipStyles.chipTextActive]}>My Leads</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[chipStyles.chip, ownerFilter === 'all' && chipStyles.chipActive]}
+                onPress={() => setOwnerFilter('all')}
+              >
+                <Text style={[chipStyles.chipText, ownerFilter === 'all' && chipStyles.chipTextActive]}>All Leads</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <View style={[isWide ? styles.filterGroupWide : undefined, { marginTop: isWide ? 0 : 10 }]}>
             <Text style={styles.filterLabel}>Status</Text>
             <ScrollableChips
               items={['All', ...PIPELINE_STATUSES]}
@@ -139,12 +166,14 @@ export default function LeadsScreen() {
               onSelect={(v) => setStatusFilter(v as PipelineStatus | 'All')}
             />
           </View>
-
         </View>
       )}
 
       <View style={styles.countRow}>
-        <Text style={styles.countText}>{filtered.length} lead{filtered.length !== 1 ? 's' : ''}</Text>
+        <Text style={styles.countText}>
+          {filtered.length} lead{filtered.length !== 1 ? 's' : ''}
+          {ownerFilter === 'mine' ? ' (mine)' : ''}
+        </Text>
       </View>
 
       <FlatList
@@ -160,7 +189,7 @@ export default function LeadsScreen() {
           <EmptyState
             icon={<Users size={40} color={Colors.textTertiary} />}
             title="No leads found"
-            message={search ? "Try a different search term" : "Add your first lead to get started"}
+            message={search ? "Try a different search term" : ownerFilter === 'mine' ? "No leads assigned to you" : "Add your first lead to get started"}
           />
         }
       />
@@ -221,11 +250,7 @@ function ScrollableChips({
 }
 
 const chipStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -234,38 +259,23 @@ const chipStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  chipText: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '500' as const,
+  chipActive: {
+    backgroundColor: Colors.primaryMuted,
+    borderColor: Colors.primary,
   },
+  chipText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '500' as const },
+  chipTextActive: { color: Colors.primary },
 });
 
 const listStyles = StyleSheet.create({
-  wideItem: {
-    flex: 1,
-    maxWidth: '50%' as unknown as number,
-    paddingHorizontal: 4,
-  },
-  columnWrapper: {
-    gap: 0,
-  },
+  wideItem: { flex: 1, maxWidth: '50%' as unknown as number, paddingHorizontal: 4 },
+  columnWrapper: { gap: 0 },
 });
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  searchRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 10,
-  },
-  searchRowWide: {
-    paddingHorizontal: 24,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  searchRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 10 },
+  searchRowWide: { paddingHorizontal: 24 },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
@@ -277,15 +287,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  searchBarWide: {
-    maxWidth: 400,
-  },
-  searchInput: {
-    flex: 1,
-    color: Colors.textPrimary,
-    fontSize: 14,
-    paddingVertical: 10,
-  },
+  searchBarWide: { maxWidth: 400 },
+  searchInput: { flex: 1, color: Colors.textPrimary, fontSize: 14, paddingVertical: 10 },
   filterBtn: {
     width: 42,
     height: 42,
@@ -296,10 +299,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  filterBtnActive: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primaryMuted,
-  },
+  filterBtnActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryMuted },
   addBtnInline: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -309,23 +309,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: Colors.primary,
   },
-  addBtnText: {
-    color: Colors.white,
-    fontSize: 14,
-    fontWeight: '600' as const,
-  },
-  filterSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  filterSectionWide: {
-    flexDirection: 'row',
-    gap: 24,
-    paddingHorizontal: 24,
-  },
-  filterGroupWide: {
-    flex: 1,
-  },
+  addBtnText: { color: Colors.white, fontSize: 14, fontWeight: '600' as const },
+  filterSection: { paddingHorizontal: 16, paddingBottom: 12 },
+  filterSectionWide: { flexDirection: 'row', gap: 24, paddingHorizontal: 24 },
+  filterGroupWide: { flex: 1 },
   filterLabel: {
     color: Colors.textTertiary,
     fontSize: 11,
@@ -334,21 +321,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 6,
   },
-  countRow: {
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-  },
-  countText: {
-    color: Colors.textTertiary,
-    fontSize: 12,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 100,
-  },
-  listContentWide: {
-    paddingHorizontal: 20,
-  },
+  countRow: { paddingHorizontal: 16, paddingBottom: 4 },
+  countText: { color: Colors.textTertiary, fontSize: 12 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 100 },
+  listContentWide: { paddingHorizontal: 20 },
   fab: {
     position: 'absolute',
     bottom: 24,

@@ -1,59 +1,65 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Phone, Clock, AlertTriangle, MessageCircle, CalendarPlus } from 'lucide-react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
+import { Phone, Clock, MessageCircle, CalendarPlus, Calendar } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { StatusBadge } from './StatusBadge';
-import { formatRelativeTime, formatPhone } from '@/utils/formatters';
-import { getLeadSLAStatus } from '@/utils/sla-engine';
-import type { Lead, FollowUpTask } from '@/types/leads';
+import { EscalationBadge } from './EscalationBadge';
+import { formatRelativeTime, formatPhone, formatDateTime, getWhatsAppUrl, getDialerUrl } from '@/utils/formatters';
+import type { Lead, FollowUpTask, ActivityLogEntry } from '@/types/leads';
 
 interface LeadCardProps {
   lead: Lead;
-  followUps: FollowUpTask[];
+  followUps?: FollowUpTask[];
+  activities?: ActivityLogEntry[];
   onPress: (id: string) => void;
   compact?: boolean;
   ownerName?: string | null;
   onMarkContacted?: (id: string) => void;
   onSetFollowUp?: (id: string) => void;
+  onOpenComposer?: (id: string) => void;
   showQuickActions?: boolean;
 }
 
 export const LeadCard = React.memo(function LeadCard({
   lead,
-  followUps,
+  followUps: _followUps,
+  activities = [],
   onPress,
   compact,
   ownerName,
   onMarkContacted,
   onSetFollowUp,
+  onOpenComposer,
   showQuickActions,
 }: LeadCardProps) {
-  const slaStatus = getLeadSLAStatus(lead, followUps);
-
-  const borderColor = slaStatus === 'escalated'
-    ? Colors.danger
-    : slaStatus === 'critical'
-    ? Colors.warning
-    : Colors.border;
-
   const canMarkContacted = lead.status === 'New';
-  const showActions = showQuickActions && (canMarkContacted || onSetFollowUp);
+  const isActive = lead.status !== 'Closed' && lead.status !== 'Lost';
+  const showActions = showQuickActions && isActive;
+
+  const handleCall = (e: any) => {
+    e.stopPropagation?.();
+    const url = getDialerUrl(lead.phone);
+    console.log('[LeadCard] Opening dialer:', url);
+    Linking.openURL(url).catch(() => {});
+  };
+
+  const handleWhatsApp = (e: any) => {
+    e.stopPropagation?.();
+    const url = getWhatsAppUrl(lead.phone);
+    console.log('[LeadCard] Opening WhatsApp:', url);
+    Linking.openURL(url).catch(() => {});
+  };
 
   return (
     <TouchableOpacity
-      style={[styles.card, { borderLeftColor: borderColor, borderLeftWidth: 3 }]}
+      style={styles.card}
       onPress={() => onPress(lead.id)}
       activeOpacity={0.7}
       testID={`lead-card-${lead.id}`}
     >
       <View style={styles.header}>
         <Text style={styles.name} numberOfLines={1}>{lead.full_name}</Text>
-        {(slaStatus === 'critical' || slaStatus === 'escalated') && (
-          <AlertTriangle
-            size={14}
-            color={slaStatus === 'escalated' ? Colors.danger : Colors.warning}
-          />
-        )}
+        <EscalationBadge lead={lead} activities={activities} size="small" />
       </View>
 
       {!compact && (
@@ -75,38 +81,68 @@ export const LeadCard = React.memo(function LeadCard({
         </View>
       </View>
 
+      {lead.next_followup_at && isActive && (
+        <View style={styles.followUpRow}>
+          <Calendar size={10} color={Colors.warning} />
+          <Text style={styles.followUpText}>
+            {formatDateTime(lead.next_followup_at)}
+          </Text>
+        </View>
+      )}
+
       {lead.premium_amount != null && !compact && (
         <Text style={styles.premium}>${lead.premium_amount.toLocaleString()}</Text>
       )}
 
       {showActions && (
         <View style={styles.actionsRow}>
+          <TouchableOpacity
+            style={styles.tapBtn}
+            onPress={handleCall}
+            activeOpacity={0.7}
+            testID={`call-${lead.id}`}
+          >
+            <Phone size={13} color="#22C55E" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.tapBtn}
+            onPress={handleWhatsApp}
+            activeOpacity={0.7}
+            testID={`wa-${lead.id}`}
+          >
+            <MessageCircle size={13} color="#25D366" />
+          </TouchableOpacity>
+
           {canMarkContacted && onMarkContacted && (
             <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                onMarkContacted(lead.id);
-              }}
+              style={[styles.actionBtn, styles.actionBtnContact]}
+              onPress={(e) => { e.stopPropagation?.(); onMarkContacted(lead.id); }}
               activeOpacity={0.7}
-              testID={`mark-contacted-${lead.id}`}
             >
-              <MessageCircle size={12} color={Colors.cyan} />
-              <Text style={styles.actionBtnText}>Mark Contacted</Text>
+              <Text style={styles.actionBtnContactText}>Contacted</Text>
             </TouchableOpacity>
           )}
-          {onSetFollowUp && lead.status !== 'Closed' && lead.status !== 'Lost' && (
+
+          {onSetFollowUp && (
             <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnFollowUp]}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                onSetFollowUp(lead.id);
-              }}
+              style={[styles.actionBtn, styles.actionBtnFU]}
+              onPress={(e) => { e.stopPropagation?.(); onSetFollowUp(lead.id); }}
               activeOpacity={0.7}
-              testID={`set-followup-${lead.id}`}
             >
-              <CalendarPlus size={12} color={Colors.warning} />
-              <Text style={[styles.actionBtnText, styles.actionBtnTextFollowUp]}>+1 Biz Day</Text>
+              <CalendarPlus size={11} color={Colors.warning} />
+              <Text style={styles.actionBtnFUText}>+1 Day</Text>
+            </TouchableOpacity>
+          )}
+
+          {onOpenComposer && (
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.actionBtnComposer]}
+              onPress={(e) => { e.stopPropagation?.(); onOpenComposer(lead.id); }}
+              activeOpacity={0.7}
+            >
+              <Calendar size={11} color={Colors.primary} />
+              <Text style={styles.actionBtnComposerText}>Set</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -129,13 +165,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 6,
+    gap: 6,
   },
   name: {
     color: Colors.textPrimary,
     fontSize: 15,
     fontWeight: '600' as const,
     flex: 1,
-    marginRight: 8,
   },
   phoneRow: {
     flexDirection: 'row',
@@ -176,6 +212,17 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary,
     fontSize: 11,
   },
+  followUpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+  },
+  followUpText: {
+    color: Colors.warning,
+    fontSize: 11,
+    fontWeight: '500' as const,
+  },
   premium: {
     color: Colors.success,
     fontSize: 13,
@@ -184,34 +231,58 @@ const styles = StyleSheet.create({
   },
   actionsRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
+    alignItems: 'center',
+  },
+  tapBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   actionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 8,
+    gap: 4,
+    paddingVertical: 7,
     borderRadius: 8,
-    backgroundColor: Colors.cyanMuted,
     borderWidth: 1,
+  },
+  actionBtnContact: {
+    backgroundColor: Colors.cyanMuted,
     borderColor: Colors.cyan + '33',
   },
-  actionBtnFollowUp: {
-    backgroundColor: Colors.warningMuted,
-    borderColor: Colors.warning + '33',
-  },
-  actionBtnText: {
+  actionBtnContactText: {
     color: Colors.cyan,
     fontSize: 11,
     fontWeight: '700' as const,
   },
-  actionBtnTextFollowUp: {
+  actionBtnFU: {
+    backgroundColor: Colors.warningMuted,
+    borderColor: Colors.warning + '33',
+  },
+  actionBtnFUText: {
     color: Colors.warning,
+    fontSize: 11,
+    fontWeight: '700' as const,
+  },
+  actionBtnComposer: {
+    backgroundColor: Colors.primaryMuted,
+    borderColor: Colors.primary + '33',
+  },
+  actionBtnComposerText: {
+    color: Colors.primary,
+    fontSize: 11,
+    fontWeight: '700' as const,
   },
 });

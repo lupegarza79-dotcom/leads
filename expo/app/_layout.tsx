@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { LeadsProvider } from "@/providers/LeadsProvider";
 import { Colors } from "@/constants/colors";
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -81,6 +81,14 @@ function RootLayoutNav() {
           }}
         />
         <Stack.Screen
+          name="follow-up"
+          options={{
+            presentation: "modal",
+            title: "Set Follow-up",
+            headerStyle: { backgroundColor: Colors.surfaceElevated },
+          }}
+        />
+        <Stack.Screen
           name="settings"
           options={{
             title: "Settings",
@@ -93,7 +101,7 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
-    SplashScreen.hideAsync();
+    void SplashScreen.hideAsync();
   }, []);
 
   return (

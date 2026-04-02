@@ -60,3 +60,22 @@ export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength - 1) + '…';
 }
+
+export function normalizePhoneForLink(phone: string): string {
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length === 10) return '1' + cleaned;
+  if (cleaned.length === 11 && cleaned.startsWith('1')) return cleaned;
+  return cleaned;
+}
+
+export function getWhatsAppUrl(phone: string, message?: string): string {
+  const num = normalizePhoneForLink(phone);
+  const base = `https://wa.me/${num}`;
+  if (message) return `${base}?text=${encodeURIComponent(message)}`;
+  return base;
+}
+
+export function getDialerUrl(phone: string): string {
+  const num = normalizePhoneForLink(phone);
+  return `tel:+${num}`;
+}

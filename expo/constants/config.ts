@@ -17,7 +17,7 @@ export const PIPELINE_STATUSES = [
 ] as const;
 export type PipelineStatus = (typeof PIPELINE_STATUSES)[number];
 
-export const ACTIVITY_TYPES = ['call', 'whatsapp', 'email', 'note', 'status_change'] as const;
+export const ACTIVITY_TYPES = ['call', 'whatsapp', 'email', 'note', 'status_change', 'follow_up', 'reassignment', 'escalation'] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export interface WorkingHoursConfig {
@@ -51,6 +51,28 @@ export const SLA_THRESHOLDS: SLAThresholds = {
 };
 
 export const FOLLOW_UP_SCHEDULE_DAYS = [1, 3, 7] as const;
+
+export const FOLLOW_UP_CHANNELS = ['call', 'whatsapp', 'email', 'note'] as const;
+export type FollowUpChannel = (typeof FOLLOW_UP_CHANNELS)[number];
+
+export const FOLLOW_UP_PRIORITIES = ['normal', 'high', 'critical'] as const;
+export type FollowUpPriority = (typeof FOLLOW_UP_PRIORITIES)[number];
+
+export const FOLLOW_UP_REASONS = [
+  'Quote follow-up',
+  'Waiting docs',
+  'Callback requested',
+  'Payment',
+  'Renewal',
+  'Custom',
+] as const;
+export type FollowUpReason = (typeof FOLLOW_UP_REASONS)[number];
+
+export const ESCALATION_THRESHOLDS = {
+  dueSoonMinutes: 15,
+  overdueMinutes: 30,
+  escalatedMinutes: 60,
+} as const;
 
 export const NOTIFICATION_CHANNELS = {
   whatsapp: {

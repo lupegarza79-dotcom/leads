@@ -19,7 +19,7 @@ import { addBusinessDays } from '@/utils/business-hours';
 
 export default function PipelineScreen() {
   const router = useRouter();
-  const { followUps, getLeadsByStatus, getUserById, changeStatus, updateLead, addActivity } = useLeads();
+  const { followUps, activities, getLeadsByStatus, getUserById, changeStatus, updateLead, addActivity } = useLeads();
   const { appUser } = useAuth();
   const [activeColumnIndex, setActiveColumnIndex] = useState(0);
   const { width, isWide, isDesktop } = useResponsive();
@@ -64,6 +64,10 @@ export default function PipelineScreen() {
       Alert.alert('Error', e?.message ?? 'Failed to set follow-up.');
     }
   }, [updateLead, addActivity, appUser]);
+
+  const handleOpenComposer = useCallback((id: string) => {
+    router.push(`/follow-up?leadId=${id}`);
+  }, [router]);
 
   const visibleCount = isDesktop ? activeStatuses.length : isWide ? 3 : 1;
   const columnWidth = isDesktop
@@ -178,12 +182,14 @@ export default function PipelineScreen() {
                       key={lead.id}
                       lead={lead}
                       followUps={followUps}
+                      activities={activities}
                       onPress={handleLeadPress}
                       ownerName={getUserById(lead.owner_id)?.name ?? null}
                       compact
                       showQuickActions
                       onMarkContacted={handleMarkContacted}
                       onSetFollowUp={handleSetFollowUp}
+                      onOpenComposer={handleOpenComposer}
                     />
                   ))
                 )}
@@ -206,115 +212,29 @@ export default function PipelineScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    gap: 4,
-  },
-  navButton: {
-    padding: 4,
-  },
-  navDisabled: {
-    opacity: 0.3,
-  },
-  statusTabs: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-  },
-  statusTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 12,
-    gap: 4,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusTabText: {
-    fontSize: 11,
-    fontWeight: '600' as const,
-  },
-  countBubble: {
-    color: Colors.textTertiary,
-    fontSize: 10,
-    fontWeight: '600' as const,
-  },
-  columnsRow: {
-    flex: 1,
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  columnsRowDesktop: {
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  column: {
-    marginRight: 0,
-  },
-  columnDesktop: {
-    flex: 1,
-    minWidth: 0,
-  },
-  columnHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  columnTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  columnDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  columnTitle: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700' as const,
-  },
-  columnCount: {
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  columnCountText: {
-    fontSize: 13,
-    fontWeight: '700' as const,
-  },
-  columnScroll: {
-    flex: 1,
-  },
-  columnContent: {
-    paddingBottom: 100,
-  },
-  emptyColumn: {
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
-  emptyColumnText: {
-    color: Colors.textTertiary,
-    fontSize: 14,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  navRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 10, gap: 4 },
+  navButton: { padding: 4 },
+  navDisabled: { opacity: 0.3 },
+  statusTabs: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, justifyContent: 'center', flexWrap: 'wrap' },
+  statusTab: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12, gap: 4 },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusTabText: { fontSize: 11, fontWeight: '600' as const },
+  countBubble: { color: Colors.textTertiary, fontSize: 10, fontWeight: '600' as const },
+  columnsRow: { flex: 1, flexDirection: 'row', paddingHorizontal: 20, gap: 12 },
+  columnsRowDesktop: { paddingHorizontal: 16, gap: 10 },
+  column: { marginRight: 0 },
+  columnDesktop: { flex: 1, minWidth: 0 },
+  columnHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 4 },
+  columnTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  columnDot: { width: 10, height: 10, borderRadius: 5 },
+  columnTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' as const },
+  columnCount: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
+  columnCountText: { fontSize: 13, fontWeight: '700' as const },
+  columnScroll: { flex: 1 },
+  columnContent: { paddingBottom: 100 },
+  emptyColumn: { paddingVertical: 40, alignItems: 'center' },
+  emptyColumnText: { color: Colors.textTertiary, fontSize: 14 },
   fab: {
     position: 'absolute',
     bottom: 24,
