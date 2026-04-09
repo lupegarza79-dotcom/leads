@@ -28,6 +28,7 @@ import {
   X,
   CalendarPlus,
   Home,
+  AlertTriangle,
 } from 'lucide-react-native';
 import { Colors, StatusColors } from '@/constants/colors';
 import { PIPELINE_STATUSES, ACTIVITY_TYPES } from '@/constants/config';
@@ -41,6 +42,7 @@ import { ObservabilityPanel } from '@/components/ObservabilityPanel';
 import { formatPhone, formatDateTime, formatDate, formatCurrency, getWhatsAppUrl, getDialerUrl } from '@/utils/formatters';
 import { getEscalationInfo } from '@/utils/escalation';
 import { withTimeout } from '@/utils/with-timeout';
+import { isLeadIncomplete, getMissingQuoteFields, CARRIERS } from '@/utils/lead-helpers';
 
 type Section = 'details' | 'activity' | 'followups' | 'status';
 
@@ -85,6 +87,12 @@ export default function LeadDetailScreen() {
   const [editAmount, setEditAmount] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editOwnerId, setEditOwnerId] = useState<string | null>(null);
+  const [editCarrier, setEditCarrier] = useState('');
+  const [editQuotePrice, setEditQuotePrice] = useState('');
+  const [editPremiumAmount, setEditPremiumAmount] = useState('');
+  const [editDownPayment, setEditDownPayment] = useState('');
+  const [editMonthlyPayment, setEditMonthlyPayment] = useState('');
+  const [editEffectiveDate, setEditEffectiveDate] = useState('');
 
   const [toastVisible, setToastVisible] = useState(false);
   const [toastType, setToastType] = useState<ToastType>('success');
@@ -93,6 +101,7 @@ export default function LeadDetailScreen() {
   const [lastActionResult, setLastActionResult] = useState<LastActionResult | null>(null);
 
   const submittingRef = useRef(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((type: ToastType, message: string) => {
     setToastType(type);
@@ -102,6 +111,16 @@ export default function LeadDetailScreen() {
   }, []);
 
   const dismissToast = useCallback(() => setToastVisible(false), []);
+
+  const incomplete = useMemo(() => {
+    if (!lead) return false;
+    return isLeadIncomplete(lead);
+  }, [lead]);
+
+  const missingFields = useMemo(() => {
+    if (!lead) return [];
+    return getMissingQuoteFields(lead);
+  }, [lead]);
 
   const escalation = useMemo(() => {
     if (!lead) return null;
@@ -114,6 +133,15 @@ export default function LeadDetailScreen() {
     return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
   }, [mgUsers]);
 
+  const resetSubmitting = useCallback(() => {
+    setIsSubmitting(false);
+    submittingRef.current = false;
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+  }, []);
+
   const startEdit = useCallback(() => {
     if (!lead) return;
     setEditName(lead.full_name);
@@ -121,6 +149,12 @@ export default function LeadDetailScreen() {
     setEditAmount(lead.amount_due != null ? String(lead.amount_due) : '');
     setEditNotes(lead.notes ?? '');
     setEditOwnerId(lead.owner_id);
+    setEditCarrier(lead.carrier ?? '');
+    setEditQuotePrice(lead.quote_price != null ? String(lead.quote_price) : '');
+    setEditPremiumAmount(lead.premium_amount != null ? String(lead.premium_amount) : '');
+    setEditDownPayment(lead.down_payment != null ? String(lead.down_payment) : '');
+    setEditMonthlyPayment(lead.monthly_payment != null ? String(lead.monthly_payment) : '');
+    setEditEffectiveDate(lead.effective_date ?? '');
     setIsEditing(true);
   }, [lead]);
 
@@ -128,6 +162,13 @@ export default function LeadDetailScreen() {
     if (!lead || !appUser?.id || submittingRef.current) return;
     submittingRef.current = true;
     setIsSubmitting(true);
+
+    saveTimeoutRef.current = setTimeout(() => {
+      console.log('[LeadDetail] Save safety timeout triggered at 15s');
+      resetSubmitting();
+      showToast('warning', 'Save timed out. Changes may not have been saved.');
+    }, 15000);
+
     try {
       const changes: string[] = [];
       const updates: Record<string, unknown> = {};
@@ -156,44 +197,87 @@ export default function LeadDetailScreen() {
         changes.push(`Assigned: ${owner?.name ?? 'unassigned'} → ${newOwner?.name ?? 'unassigned'}`);
       }
 
+      const newCarrier = editCarrier.trim() || null;
+      if (newCarrier !== (lead.carrier ?? null)) {
+        updates.carrier = newCarrier;
+        changes.push(`Carrier: ${lead.carrier ?? 'none'} → ${newCarrier ?? 'none'}`);
+      }
+      const newQuotePrice = editQuotePrice ? parseFloat(editQuotePrice) : null;
+      if (newQuotePrice !== lead.quote_price) {
+        updates.quote_price = newQuotePrice;
+        changes.push(`Quote price updated`);
+      }
+      const newPremium = editPremiumAmount ? parseFloat(editPremiumAmount) : null;
+      if (newPremium !== lead.premium_amount) {
+        updates.premium_amount = newPremium;
+        changes.push(`Premium updated`);
+      }
+      const newDown = editDownPayment ? parseFloat(editDownPayment) : null;
+      if (newDown !== lead.down_payment) {
+        updates.down_payment = newDown;
+        changes.push(`Down payment updated`);
+      }
+      const newMonthly = editMonthlyPayment ? parseFloat(editMonthlyPayment) : null;
+      if (newMonthly !== lead.monthly_payment) {
+        updates.monthly_payment = newMonthly;
+        changes.push(`Monthly payment updated`);
+      }
+      if ((newDown != null || newMonthly != null)) {
+        const computedTotal = (newDown ?? 0) + (newMonthly ?? 0);
+        if (computedTotal > 0 && computedTotal !== lead.total_premium) {
+          updates.total_premium = computedTotal;
+        }
+      }
+      const newEffective = editEffectiveDate.trim() || null;
+      if (newEffective !== (lead.effective_date ?? null)) {
+        updates.effective_date = newEffective;
+        changes.push(`Effective date updated`);
+      }
+
       if (Object.keys(updates).length === 0) {
         setIsEditing(false);
-        setIsSubmitting(false);
-        submittingRef.current = false;
+        resetSubmitting();
         return;
       }
 
-      await withTimeout(updateLead({ id: lead.id, updates: updates as any }));
+      await withTimeout(updateLead({ id: lead.id, updates: updates as any }), 12000);
 
       if (changes.length > 0) {
-        await withTimeout(addActivity({
-          lead_id: lead.id,
-          user_id: appUser.id,
-          type: 'note',
-          note: `Lead edited: ${changes.join(', ')}`,
-        }));
+        try {
+          await withTimeout(addActivity({
+            lead_id: lead.id,
+            user_id: appUser.id,
+            type: 'note',
+            note: `Lead edited: ${changes.join(', ')}`,
+          }), 8000);
+        } catch (actErr) {
+          console.log('[LeadDetail] Non-critical: activity log failed:', actErr);
+        }
       }
 
       if (editOwnerId !== lead.owner_id) {
-        await withTimeout(addActivity({
-          lead_id: lead.id,
-          user_id: appUser.id,
-          type: 'note',
-          note: `[REASSIGNMENT] Reassigned to ${getUserById(editOwnerId)?.name ?? 'unassigned'}`,
-        }));
+        try {
+          await withTimeout(addActivity({
+            lead_id: lead.id,
+            user_id: appUser.id,
+            type: 'note',
+            note: `[REASSIGNMENT] Reassigned to ${getUserById(editOwnerId)?.name ?? 'unassigned'}`,
+          }), 8000);
+        } catch (actErr) {
+          console.log('[LeadDetail] Non-critical: reassignment activity log failed:', actErr);
+        }
       }
 
       setIsEditing(false);
+      resetSubmitting();
       showToast('success', 'Lead saved successfully');
       console.log('[LeadDetail] Edit saved');
     } catch (e: any) {
       console.log('[LeadDetail] Save error:', e?.message);
+      resetSubmitting();
       showToast('error', e?.message ?? 'Failed to save changes');
-    } finally {
-      setIsSubmitting(false);
-      submittingRef.current = false;
     }
-  }, [lead, editName, editPhone, editAmount, editNotes, editOwnerId, appUser, updateLead, addActivity, getUserById, owner, showToast]);
+  }, [lead, editName, editPhone, editAmount, editNotes, editOwnerId, editCarrier, editQuotePrice, editPremiumAmount, editDownPayment, editMonthlyPayment, editEffectiveDate, appUser, updateLead, addActivity, getUserById, owner, showToast, resetSubmitting]);
 
   const handleStatusChange = useCallback(async (status: PipelineStatus) => {
     if (!lead || !appUser?.id || submittingRef.current) return;
@@ -206,10 +290,9 @@ export default function LeadDetailScreen() {
     } catch (e: any) {
       showToast('error', e?.message ?? 'Failed to update status');
     } finally {
-      setIsSubmitting(false);
-      submittingRef.current = false;
+      resetSubmitting();
     }
-  }, [lead, changeStatus, appUser, showToast]);
+  }, [lead, changeStatus, appUser, showToast, resetSubmitting]);
 
   const handleAddActivity = useCallback(async () => {
     if (!lead || !activityNote.trim() || !appUser?.id || submittingRef.current) return;
@@ -229,10 +312,9 @@ export default function LeadDetailScreen() {
     } catch (e: any) {
       showToast('error', e?.message ?? 'Failed to log activity');
     } finally {
-      setIsSubmitting(false);
-      submittingRef.current = false;
+      resetSubmitting();
     }
-  }, [lead, activityType, activityNote, addActivity, appUser, showToast]);
+  }, [lead, activityType, activityNote, addActivity, appUser, showToast, resetSubmitting]);
 
   const handleCompleteFollowUp = useCallback(async (taskId: string) => {
     try {
@@ -266,6 +348,11 @@ export default function LeadDetailScreen() {
     router.replace('/');
   }, [router]);
 
+  const cancelEdit = useCallback(() => {
+    setIsEditing(false);
+    resetSubmitting();
+  }, [resetSubmitting]);
+
   if (!lead) {
     return (
       <View style={styles.centered}>
@@ -288,10 +375,18 @@ export default function LeadDetailScreen() {
       />
       <View style={styles.wrapper}>
         <ActionToast visible={toastVisible} type={toastType} message={toastMessage} onDismiss={dismissToast} />
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
             <View style={styles.headerTop}>
-              <StatusBadge status={lead.status} />
+              <View style={styles.headerBadges}>
+                <StatusBadge status={lead.status} />
+                {incomplete && (
+                  <View style={styles.incompletePill}>
+                    <AlertTriangle size={10} color={Colors.warning} />
+                    <Text style={styles.incompletePillText}>Incomplete</Text>
+                  </View>
+                )}
+              </View>
               {escalation && (
                 <View style={[styles.slaPill, { backgroundColor: escalation.bgColor }]}>
                   <View style={[styles.slaDot, { backgroundColor: escalation.color }]} />
@@ -334,6 +429,15 @@ export default function LeadDetailScreen() {
                 </View>
               )}
             </View>
+
+            {incomplete && missingFields.length > 0 && (
+              <View style={styles.incompleteBar}>
+                <AlertTriangle size={12} color={Colors.warning} />
+                <Text style={styles.incompleteBarText}>
+                  Missing: {missingFields.join(', ')}
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.quickActions}>
@@ -370,10 +474,12 @@ export default function LeadDetailScreen() {
             <View style={styles.editForm}>
               <View style={styles.editHeader}>
                 <Text style={styles.formTitle}>Edit Lead</Text>
-                <TouchableOpacity onPress={() => { setIsEditing(false); setIsSubmitting(false); }}>
+                <TouchableOpacity onPress={cancelEdit}>
                   <X size={18} color={Colors.textTertiary} />
                 </TouchableOpacity>
               </View>
+
+              <Text style={styles.editSectionLabel}>CONTACT</Text>
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Name</Text>
                 <TextInput style={styles.editInput} value={editName} onChangeText={setEditName} placeholderTextColor={Colors.textTertiary} />
@@ -381,10 +487,6 @@ export default function LeadDetailScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Phone</Text>
                 <TextInput style={styles.editInput} value={editPhone} onChangeText={setEditPhone} keyboardType="phone-pad" placeholderTextColor={Colors.textTertiary} />
-              </View>
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Amount Due</Text>
-                <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
               </View>
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Assigned To</Text>
@@ -406,8 +508,57 @@ export default function LeadDetailScreen() {
                   ))}
                 </View>
               </View>
+
+              <Text style={styles.editSectionLabel}>QUOTE & FINANCIALS</Text>
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Notes</Text>
+                <Text style={styles.editLabel}>Carrier</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.editChips}>
+                    {CARRIERS.map(c => (
+                      <TouchableOpacity
+                        key={c}
+                        style={[styles.editChip, editCarrier === c && styles.editChipActive]}
+                        onPress={() => setEditCarrier(editCarrier === c ? '' : c)}
+                      >
+                        <Text style={[styles.editChipText, editCarrier === c && styles.editChipTextActive]}>{c}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+              </View>
+              <View style={styles.editFieldRow}>
+                <View style={styles.editFieldHalf}>
+                  <Text style={styles.editLabel}>Amount Due</Text>
+                  <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
+                </View>
+                <View style={styles.editFieldHalf}>
+                  <Text style={styles.editLabel}>Quote Price</Text>
+                  <TextInput style={styles.editInput} value={editQuotePrice} onChangeText={setEditQuotePrice} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
+                </View>
+              </View>
+              <View style={styles.editFieldRow}>
+                <View style={styles.editFieldHalf}>
+                  <Text style={styles.editLabel}>Premium Amount</Text>
+                  <TextInput style={styles.editInput} value={editPremiumAmount} onChangeText={setEditPremiumAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
+                </View>
+                <View style={styles.editFieldHalf}>
+                  <Text style={styles.editLabel}>Effective Date</Text>
+                  <TextInput style={styles.editInput} value={editEffectiveDate} onChangeText={setEditEffectiveDate} placeholder="MM/DD/YYYY" placeholderTextColor={Colors.textTertiary} />
+                </View>
+              </View>
+              <View style={styles.editFieldRow}>
+                <View style={styles.editFieldHalf}>
+                  <Text style={styles.editLabel}>Down Payment</Text>
+                  <TextInput style={styles.editInput} value={editDownPayment} onChangeText={setEditDownPayment} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
+                </View>
+                <View style={styles.editFieldHalf}>
+                  <Text style={styles.editLabel}>Monthly Payment</Text>
+                  <TextInput style={styles.editInput} value={editMonthlyPayment} onChangeText={setEditMonthlyPayment} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
+                </View>
+              </View>
+
+              <Text style={styles.editSectionLabel}>NOTES</Text>
+              <View style={styles.editField}>
                 <TextInput
                   style={[styles.editInput, styles.editTextArea]}
                   value={editNotes}
@@ -516,13 +667,13 @@ export default function LeadDetailScreen() {
               {lead.quoted_at && <DetailRow icon={<Calendar size={14} color={Colors.info} />} label="Quoted" value={formatDateTime(lead.quoted_at)} />}
               {lead.closed_at && <DetailRow icon={<CheckCircle size={14} color={Colors.success} />} label="Closed" value={formatDateTime(lead.closed_at)} />}
               {lead.next_followup_at && <DetailRow icon={<Calendar size={14} color={Colors.warning} />} label="Next Follow-up" value={formatDateTime(lead.next_followup_at)} />}
+              {lead.carrier && <DetailRow icon={<FileText size={14} color={Colors.textTertiary} />} label="Carrier" value={lead.carrier} />}
+              {lead.quote_price != null && <DetailRow icon={<DollarSign size={14} color={Colors.cyan} />} label="Quote Price" value={formatCurrency(lead.quote_price)} />}
               {lead.premium_amount != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Premium" value={formatCurrency(lead.premium_amount)} />}
               {lead.amount_due != null && <DetailRow icon={<DollarSign size={14} color={Colors.primary} />} label="Le quedó en" value={formatCurrency(lead.amount_due)} />}
               {lead.down_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.info} />} label="Down Payment" value={formatCurrency(lead.down_payment)} />}
               {lead.monthly_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.warning} />} label="Monthly" value={formatCurrency(lead.monthly_payment)} />}
               {lead.total_premium != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Total Premium" value={formatCurrency(lead.total_premium)} />}
-              {lead.quote_price != null && <DetailRow icon={<DollarSign size={14} color={Colors.cyan} />} label="Quote Price" value={formatCurrency(lead.quote_price)} />}
-              {lead.carrier && <DetailRow icon={<FileText size={14} color={Colors.textTertiary} />} label="Carrier" value={lead.carrier} />}
               {lead.effective_date && <DetailRow icon={<Calendar size={14} color={Colors.success} />} label="Effective Date" value={lead.effective_date} />}
               {lead.renewal_date && <DetailRow icon={<Calendar size={14} color={Colors.info} />} label="Renewal" value={formatDate(lead.renewal_date)} />}
               {lead.notes ? (
@@ -622,6 +773,41 @@ const styles = StyleSheet.create({
   headerBtn: { padding: 4 },
   header: { padding: 20, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  headerBadges: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  incompletePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: Colors.warningMuted,
+    borderWidth: 1,
+    borderColor: Colors.warning + '33',
+  },
+  incompletePillText: {
+    color: Colors.warning,
+    fontSize: 10,
+    fontWeight: '700' as const,
+  },
+  incompleteBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.warningMuted,
+    borderWidth: 1,
+    borderColor: Colors.warning + '22',
+  },
+  incompleteBarText: {
+    color: Colors.warning,
+    fontSize: 11,
+    fontWeight: '500' as const,
+    flex: 1,
+  },
   slaPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 5 },
   slaDot: { width: 6, height: 6, borderRadius: 3 },
   slaText: { fontSize: 11, fontWeight: '700' as const },
@@ -670,8 +856,18 @@ const styles = StyleSheet.create({
   actionText: { color: Colors.primary, fontSize: 12, fontWeight: '600' as const },
   editForm: { padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   editHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  editSectionLabel: {
+    color: Colors.textTertiary,
+    fontSize: 10,
+    fontWeight: '700' as const,
+    letterSpacing: 1,
+    marginTop: 8,
+    marginBottom: 10,
+  },
   formTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' as const },
   editField: { marginBottom: 12 },
+  editFieldRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  editFieldHalf: { flex: 1 },
   editLabel: { color: Colors.textSecondary, fontSize: 12, fontWeight: '500' as const, marginBottom: 4 },
   editInput: {
     backgroundColor: Colors.surface,

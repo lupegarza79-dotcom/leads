@@ -18,6 +18,8 @@ import { LEAD_SOURCES } from '@/constants/config';
 import type { LeadSource } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { addBusinessDays } from '@/utils/business-hours';
+import { CARRIERS } from '@/utils/lead-helpers';
+import { withTimeout } from '@/utils/with-timeout';
 
 function getQuickFollowUpOptions(): { label: string; value: Date }[] {
   const now = new Date();
@@ -69,13 +71,23 @@ export default function AddLeadScreen() {
   const [showOptional, setShowOptional] = useState(false);
   const [downPayment, setDownPayment] = useState('');
   const [monthlyPayment, setMonthlyPayment] = useState('');
-
+  const [quotePrice, setQuotePrice] = useState('');
+  const [premiumAmount, setPremiumAmount] = useState('');
+  const [carrier, setCarrier] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState('');
 
   const assignableUsers = useMemo(() => {
     return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
   }, [mgUsers]);
 
   const quickOptions = useMemo(() => getQuickFollowUpOptions(), []);
+
+  const computedTotalPremium = useMemo(() => {
+    const dp = parseFloat(downPayment || '0');
+    const mp = parseFloat(monthlyPayment || '0');
+    if (dp > 0 || mp > 0) return dp + mp;
+    return null;
+  }, [downPayment, monthlyPayment]);
 
   const handleSubmit = useCallback(async () => {
     if (!phone.trim()) {
@@ -99,7 +111,7 @@ export default function AddLeadScreen() {
     setIsSubmitting(true);
     console.log('[AddLead] Submitting lead...');
     try {
-      const result = await addLead({
+      const result = await withTimeout(addLead({
         full_name: fullName.trim() || phone.trim(),
         phone: phone.trim(),
         office: 'McAllen',
@@ -110,8 +122,12 @@ export default function AddLeadScreen() {
         next_followup_at: nextFollowUp ? nextFollowUp.toISOString() : undefined,
         down_payment: downPayment ? parseFloat(downPayment) : undefined,
         monthly_payment: monthlyPayment ? parseFloat(monthlyPayment) : undefined,
-        total_premium: (downPayment && monthlyPayment) ? parseFloat(downPayment) + parseFloat(monthlyPayment) : undefined,
-      });
+        total_premium: computedTotalPremium ?? undefined,
+        quote_price: quotePrice ? parseFloat(quotePrice) : undefined,
+        premium_amount: premiumAmount ? parseFloat(premiumAmount) : undefined,
+        carrier: carrier.trim() || undefined,
+        effective_date: effectiveDate.trim() || undefined,
+      }), 15000);
       if (result.wasUpdated) {
         console.log('[AddLead] Existing lead updated via phone match');
         Alert.alert(
@@ -129,7 +145,18 @@ export default function AddLeadScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [fullName, phone, source, ownerId, notes, amountDue, nextFollowUp, downPayment, monthlyPayment, addLead, router, isSubmitting]);
+  }, [fullName, phone, source, ownerId, notes, amountDue, nextFollowUp, downPayment, monthlyPayment, quotePrice, premiumAmount, carrier, effectiveDate, computedTotalPremium, addLead, router, isSubmitting]);
+
+  const optionalFieldCount = useMemo(() => {
+    let count = 0;
+    if (downPayment) count++;
+    if (monthlyPayment) count++;
+    if (quotePrice) count++;
+    if (premiumAmount) count++;
+    if (carrier) count++;
+    if (effectiveDate) count++;
+    return count;
+  }, [downPayment, monthlyPayment, quotePrice, premiumAmount, carrier, effectiveDate]);
 
   return (
     <KeyboardAvoidingView
@@ -275,7 +302,14 @@ export default function AddLeadScreen() {
           onPress={() => setShowOptional(!showOptional)}
           activeOpacity={0.7}
         >
-          <Text style={styles.optionalToggleText}>Optional Quote Details</Text>
+          <View style={styles.optionalToggleLeft}>
+            <Text style={styles.optionalToggleText}>Quote Details</Text>
+            {optionalFieldCount > 0 && (
+              <View style={styles.optionalBadge}>
+                <Text style={styles.optionalBadgeText}>{optionalFieldCount}</Text>
+              </View>
+            )}
+          </View>
           {showOptional ? (
             <ChevronUp size={18} color={Colors.textTertiary} />
           ) : (
@@ -286,37 +320,92 @@ export default function AddLeadScreen() {
         {showOptional && (
           <View style={styles.section}>
             <View style={styles.field}>
-              <Text style={styles.label}>Down Payment</Text>
-              <TextInput
-                style={styles.input}
-                value={downPayment}
-                onChangeText={setDownPayment}
-                placeholder="0"
-                placeholderTextColor={Colors.textTertiary}
-                keyboardType="numeric"
-                testID="input-down-payment"
-              />
+              <Text style={styles.label}>Carrier</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.carrierScroll}>
+                <View style={styles.chipRow}>
+                  {CARRIERS.map(c => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.chip, carrier === c && styles.chipActive]}
+                      onPress={() => setCarrier(carrier === c ? '' : c)}
+                    >
+                      <Text style={[styles.chipText, carrier === c && styles.chipTextActive]}>{c}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
             </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Monthly Payment</Text>
-              <TextInput
-                style={styles.input}
-                value={monthlyPayment}
-                onChangeText={setMonthlyPayment}
-                placeholder="0"
-                placeholderTextColor={Colors.textTertiary}
-                keyboardType="numeric"
-                testID="input-monthly-payment"
-              />
+            <View style={styles.fieldRow}>
+              <View style={styles.halfField}>
+                <Text style={styles.label}>Quote Price</Text>
+                <TextInput
+                  style={styles.input}
+                  value={quotePrice}
+                  onChangeText={setQuotePrice}
+                  placeholder="$0"
+                  placeholderTextColor={Colors.textTertiary}
+                  keyboardType="numeric"
+                  testID="input-quote-price"
+                />
+              </View>
+              <View style={styles.halfField}>
+                <Text style={styles.label}>Premium Amount</Text>
+                <TextInput
+                  style={styles.input}
+                  value={premiumAmount}
+                  onChangeText={setPremiumAmount}
+                  placeholder="$0"
+                  placeholderTextColor={Colors.textTertiary}
+                  keyboardType="numeric"
+                  testID="input-premium-amount"
+                />
+              </View>
             </View>
-            {(downPayment && monthlyPayment) ? (
+            <View style={styles.fieldRow}>
+              <View style={styles.halfField}>
+                <Text style={styles.label}>Down Payment</Text>
+                <TextInput
+                  style={styles.input}
+                  value={downPayment}
+                  onChangeText={setDownPayment}
+                  placeholder="$0"
+                  placeholderTextColor={Colors.textTertiary}
+                  keyboardType="numeric"
+                  testID="input-down-payment"
+                />
+              </View>
+              <View style={styles.halfField}>
+                <Text style={styles.label}>Monthly Payment</Text>
+                <TextInput
+                  style={styles.input}
+                  value={monthlyPayment}
+                  onChangeText={setMonthlyPayment}
+                  placeholder="$0"
+                  placeholderTextColor={Colors.textTertiary}
+                  keyboardType="numeric"
+                  testID="input-monthly-payment"
+                />
+              </View>
+            </View>
+            {computedTotalPremium !== null && (
               <View style={styles.autoCalcRow}>
                 <Text style={styles.autoCalcLabel}>Total Premium (auto)</Text>
                 <Text style={styles.autoCalcValue}>
-                  ${(parseFloat(downPayment || '0') + parseFloat(monthlyPayment || '0')).toFixed(2)}
+                  ${computedTotalPremium.toFixed(2)}
                 </Text>
               </View>
-            ) : null}
+            )}
+            <View style={styles.field}>
+              <Text style={styles.label}>Effective Date</Text>
+              <TextInput
+                style={styles.input}
+                value={effectiveDate}
+                onChangeText={setEffectiveDate}
+                placeholder="MM/DD/YYYY"
+                placeholderTextColor={Colors.textTertiary}
+                testID="input-effective-date"
+              />
+            </View>
           </View>
         )}
 
@@ -366,6 +455,14 @@ const styles = StyleSheet.create({
   field: {
     marginBottom: 16,
   },
+  fieldRow: {
+    flexDirection: 'row' as const,
+    gap: 12,
+    marginBottom: 16,
+  },
+  halfField: {
+    flex: 1,
+  },
   label: {
     color: Colors.textSecondary,
     fontSize: 13,
@@ -387,8 +484,8 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
     gap: 8,
   },
   chip: {
@@ -411,14 +508,17 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: Colors.primary,
   },
+  carrierScroll: {
+    marginHorizontal: -4,
+  },
   quickBtnsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
     gap: 8,
   },
   quickBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
     gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -440,9 +540,9 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
   selectedFollowUp: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
     marginTop: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -462,9 +562,9 @@ const styles = StyleSheet.create({
     fontWeight: '500' as const,
   },
   optionalToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
     paddingVertical: 14,
     paddingHorizontal: 14,
     marginBottom: 16,
@@ -473,17 +573,36 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  optionalToggleLeft: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
   optionalToggleText: {
     color: Colors.textTertiary,
     fontSize: 13,
     fontWeight: '600' as const,
   },
+  optionalBadge: {
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingHorizontal: 6,
+  },
+  optionalBadgeText: {
+    color: Colors.white,
+    fontSize: 11,
+    fontWeight: '700' as const,
+  },
   submitBtn: {
     backgroundColor: Colors.primary,
     borderRadius: 12,
     paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
     marginTop: 8,
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
@@ -500,16 +619,16 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
   },
   autoCalcRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
     paddingHorizontal: 14,
     paddingVertical: 12,
     backgroundColor: Colors.successMuted,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.success + '33',
-    marginBottom: 8,
+    marginBottom: 16,
   },
   autoCalcLabel: {
     color: Colors.textSecondary,

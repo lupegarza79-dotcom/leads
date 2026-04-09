@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
-import { Phone, Clock, MessageCircle, CalendarPlus, Calendar } from 'lucide-react-native';
+import { Phone, Clock, MessageCircle, CalendarPlus, Calendar, AlertTriangle } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { StatusBadge } from './StatusBadge';
 import { EscalationBadge } from './EscalationBadge';
 import { formatRelativeTime, formatPhone, formatDateTime, getWhatsAppUrl, getDialerUrl } from '@/utils/formatters';
+import { isLeadIncomplete } from '@/utils/lead-helpers';
 import type { Lead, FollowUpTask, ActivityLogEntry } from '@/types/leads';
 
 interface LeadCardProps {
@@ -35,6 +36,7 @@ export const LeadCard = React.memo(function LeadCard({
   const canMarkContacted = lead.status === 'New';
   const isActive = lead.status !== 'Closed' && lead.status !== 'Lost';
   const showActions = showQuickActions && isActive;
+  const incomplete = isLeadIncomplete(lead);
 
   const handleCall = (e: any) => {
     e.stopPropagation?.();
@@ -58,7 +60,15 @@ export const LeadCard = React.memo(function LeadCard({
       testID={`lead-card-${lead.id}`}
     >
       <View style={styles.header}>
-        <Text style={styles.name} numberOfLines={1}>{lead.full_name}</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.name} numberOfLines={1}>{lead.full_name}</Text>
+          {incomplete && (
+            <View style={styles.incompleteBadge}>
+              <AlertTriangle size={9} color={Colors.warning} />
+              <Text style={styles.incompleteBadgeText}>Incomplete</Text>
+            </View>
+          )}
+        </View>
         <EscalationBadge lead={lead} activities={activities} size="small" />
       </View>
 
@@ -167,11 +177,29 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     gap: 6,
   },
+  headerLeft: {
+    flex: 1,
+    gap: 3,
+  },
   name: {
     color: Colors.textPrimary,
     fontSize: 15,
     fontWeight: '600' as const,
-    flex: 1,
+  },
+  incompleteBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: Colors.warningMuted,
+  },
+  incompleteBadgeText: {
+    color: Colors.warning,
+    fontSize: 9,
+    fontWeight: '700' as const,
   },
   phoneRow: {
     flexDirection: 'row',
