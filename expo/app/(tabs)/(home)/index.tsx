@@ -14,15 +14,37 @@ import { PIPELINE_STATUSES } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { LeadCard } from '@/components/LeadCard';
+import { ActionToast, type ToastType } from '@/components/ActionToast';
 import { useResponsive } from '@/hooks/useResponsive';
 import { addBusinessDays } from '@/utils/business-hours';
+import { withTimeout } from '@/utils/with-timeout';
 
 export default function PipelineScreen() {
   const router = useRouter();
-  const { followUps, activities, getLeadsByStatus, getUserById, changeStatus, updateLead, addActivity } = useLeads();
+  const { leads, followUps, activities, getLeadsByStatus, getUserById, changeStatus, updateLead, addActivity } = useLeads();
   const { appUser } = useAuth();
   const [activeColumnIndex, setActiveColumnIndex] = useState(0);
   const { width, isWide, isDesktop } = useResponsive();
+
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastType, setToastType] = useState<ToastType>('success');
+  const [toastMsg, setToastMsg] = useState('');
+
+  const showToast = useCallback((type: ToastType, msg: string) => {
+    setToastType(type);
+    setToastMsg(msg);
+    setToastVisible(true);
+  }, []);
+
+  const isProducer = appUser?.role === 'producer';
+
+  const getFilteredLeadsByStatus = useCallback((status: string) => {
+    let result = getLeadsByStatus(status as any);
+    if (isProducer && appUser?.id) {
+      result = result.filter(l => l.owner_id === appUser.id);
+    }
+    return result;
+  }, [getLeadsByStatus, isProducer, appUser?.id]);
 
   const activeStatuses = useMemo(
     () => PIPELINE_STATUSES.filter(s => s !== 'Lost' && s !== 'Renewal Scheduled'),
@@ -36,34 +58,34 @@ export default function PipelineScreen() {
   const handleMarkContacted = useCallback(async (id: string) => {
     try {
       console.log('[Pipeline] Mark Contacted:', id);
-      await changeStatus({ id, status: 'Contacted', userId: appUser?.id ?? 'system' });
-      Alert.alert('Done', 'Lead marked as Contacted.');
+      await withTimeout(changeStatus({ id, status: 'Contacted', userId: appUser?.id ?? 'system' }));
+      showToast('success', 'Lead marked as Contacted');
     } catch (e: any) {
       console.log('[Pipeline] Error marking contacted:', e?.message);
-      Alert.alert('Error', e?.message ?? 'Failed to update lead.');
+      showToast('error', e?.message ?? 'Failed to update lead');
     }
-  }, [changeStatus, appUser]);
+  }, [changeStatus, appUser, showToast]);
 
   const handleSetFollowUp = useCallback(async (id: string) => {
     try {
       console.log('[Pipeline] Set Follow-up +1 biz day:', id);
       const nextBizDay = addBusinessDays(new Date(), 1);
       nextBizDay.setHours(10, 0, 0, 0);
-      await updateLead({ id, updates: { next_followup_at: nextBizDay.toISOString() } });
+      await withTimeout(updateLead({ id, updates: { next_followup_at: nextBizDay.toISOString() } }));
       if (appUser?.id) {
-        await addActivity({
+        await withTimeout(addActivity({
           lead_id: id,
           user_id: appUser.id,
           type: 'note',
           note: `Follow-up set to ${nextBizDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} 10:00 AM`,
-        });
+        }));
       }
-      Alert.alert('Done', 'Follow-up set for next business day 10am.');
+      showToast('success', 'Follow-up set for next biz day 10am');
     } catch (e: any) {
       console.log('[Pipeline] Error setting follow-up:', e?.message);
-      Alert.alert('Error', e?.message ?? 'Failed to set follow-up.');
+      showToast('error', e?.message ?? 'Failed to set follow-up');
     }
-  }, [updateLead, addActivity, appUser]);
+  }, [updateLead, addActivity, appUser, showToast]);
 
   const handleOpenComposer = useCallback((id: string) => {
     router.push(`/follow-up?leadId=${id}`);
@@ -94,6 +116,12 @@ export default function PipelineScreen() {
 
   return (
     <View style={styles.container}>
+      <ActionToast visible={toastVisible} type={toastType} message={toastMsg} onDismiss={() => setToastVisible(false)} />
+      {isProducer && (
+        <View style={styles.filterIndicator}>
+          <Text style={styles.filterIndicatorText}>Showing: My Leads</Text>
+        </View>
+      )}
       {!isDesktop && (
         <View style={styles.navRow}>
           <TouchableOpacity
@@ -108,7 +136,7 @@ export default function PipelineScreen() {
             {activeStatuses.map((status, i) => {
               const statusColor = StatusColors[status];
               const isActive = i >= activeColumnIndex && i < activeColumnIndex + visibleCount;
-              const count = getLeadsByStatus(status).length;
+              const count = getFilteredLeadsByStatus(status).length;
               return (
                 <TouchableOpacity
                   key={status}
@@ -144,7 +172,7 @@ export default function PipelineScreen() {
 
       <View style={[styles.columnsRow, isDesktop && styles.columnsRowDesktop]}>
         {visibleStatuses.map((status) => {
-          const statusLeads = getLeadsByStatus(status);
+          const statusLeads = getFilteredLeadsByStatus(status);
           const statusColor = StatusColors[status];
           return (
             <View
@@ -213,6 +241,19 @@ export default function PipelineScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  filterIndicator: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: Colors.primaryMuted,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  filterIndicatorText: {
+    color: Colors.primary,
+    fontSize: 11,
+    fontWeight: '600' as const,
+    textAlign: 'center' as const,
+  },
   navRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 10, gap: 4 },
   navButton: { padding: 4 },
   navDisabled: { opacity: 0.3 },

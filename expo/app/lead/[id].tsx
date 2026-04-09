@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import {
   Save,
   X,
   CalendarPlus,
+  Home,
 } from 'lucide-react-native';
 import { Colors, StatusColors } from '@/constants/colors';
 import { PIPELINE_STATUSES, ACTIVITY_TYPES } from '@/constants/config';
@@ -35,10 +36,19 @@ import { useLeads } from '@/providers/LeadsProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ActivityItem } from '@/components/ActivityItem';
+import { ActionToast, type ToastType } from '@/components/ActionToast';
+import { ObservabilityPanel } from '@/components/ObservabilityPanel';
 import { formatPhone, formatDateTime, formatDate, formatCurrency, getWhatsAppUrl, getDialerUrl } from '@/utils/formatters';
 import { getEscalationInfo } from '@/utils/escalation';
+import { withTimeout } from '@/utils/with-timeout';
 
-type Section = 'details' | 'activity' | 'followups';
+type Section = 'details' | 'activity' | 'followups' | 'status';
+
+interface LastActionResult {
+  type: 'success' | 'error';
+  message: string;
+  at: string;
+}
 
 export default function LeadDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -51,7 +61,7 @@ export default function LeadDetailScreen() {
     addActivity,
     updateLead,
     completeFollowUp,
-    followUps: _allFollowUps,
+    followUps: allFollowUps,
     activities: allActivities,
     getUserById,
     mgUsers,
@@ -76,6 +86,23 @@ export default function LeadDetailScreen() {
   const [editNotes, setEditNotes] = useState('');
   const [editOwnerId, setEditOwnerId] = useState<string | null>(null);
 
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastType, setToastType] = useState<ToastType>('success');
+  const [toastMessage, setToastMessage] = useState('');
+
+  const [lastActionResult, setLastActionResult] = useState<LastActionResult | null>(null);
+
+  const submittingRef = useRef(false);
+
+  const showToast = useCallback((type: ToastType, message: string) => {
+    setToastType(type);
+    setToastMessage(message);
+    setToastVisible(true);
+    setLastActionResult({ type: type === 'warning' ? 'error' : type, message, at: new Date().toISOString() });
+  }, []);
+
+  const dismissToast = useCallback(() => setToastVisible(false), []);
+
   const escalation = useMemo(() => {
     if (!lead) return null;
     return getEscalationInfo(lead, allActivities);
@@ -98,7 +125,8 @@ export default function LeadDetailScreen() {
   }, [lead]);
 
   const handleSaveEdit = useCallback(async () => {
-    if (!lead || !appUser?.id) return;
+    if (!lead || !appUser?.id || submittingRef.current) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
       const changes: string[] = [];
@@ -130,78 +158,90 @@ export default function LeadDetailScreen() {
 
       if (Object.keys(updates).length === 0) {
         setIsEditing(false);
+        setIsSubmitting(false);
+        submittingRef.current = false;
         return;
       }
 
-      await updateLead({ id: lead.id, updates: updates as any });
+      await withTimeout(updateLead({ id: lead.id, updates: updates as any }));
 
       if (changes.length > 0) {
-        await addActivity({
+        await withTimeout(addActivity({
           lead_id: lead.id,
           user_id: appUser.id,
           type: 'note',
           note: `Lead edited: ${changes.join(', ')}`,
-        });
+        }));
       }
 
       if (editOwnerId !== lead.owner_id) {
-        await addActivity({
+        await withTimeout(addActivity({
           lead_id: lead.id,
           user_id: appUser.id,
           type: 'note',
           note: `[REASSIGNMENT] Reassigned to ${getUserById(editOwnerId)?.name ?? 'unassigned'}`,
-        });
+        }));
       }
 
       setIsEditing(false);
+      showToast('success', 'Lead saved successfully');
       console.log('[LeadDetail] Edit saved');
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Failed to save changes');
+      console.log('[LeadDetail] Save error:', e?.message);
+      showToast('error', e?.message ?? 'Failed to save changes');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
-  }, [lead, editName, editPhone, editAmount, editNotes, editOwnerId, appUser, updateLead, addActivity, getUserById, owner]);
+  }, [lead, editName, editPhone, editAmount, editNotes, editOwnerId, appUser, updateLead, addActivity, getUserById, owner, showToast]);
 
   const handleStatusChange = useCallback(async (status: PipelineStatus) => {
-    if (!lead || !appUser?.id) return;
+    if (!lead || !appUser?.id || submittingRef.current) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
-      await changeStatus({ id: lead.id, status, userId: appUser.id });
+      await withTimeout(changeStatus({ id: lead.id, status, userId: appUser.id }));
       setShowStatusPicker(false);
-    } catch {
-      Alert.alert('Error', 'Failed to update status');
+      showToast('success', `Status changed to ${status}`);
+    } catch (e: any) {
+      showToast('error', e?.message ?? 'Failed to update status');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
-  }, [lead, changeStatus, appUser]);
+  }, [lead, changeStatus, appUser, showToast]);
 
   const handleAddActivity = useCallback(async () => {
-    if (!lead || !activityNote.trim() || !appUser?.id) return;
+    if (!lead || !activityNote.trim() || !appUser?.id || submittingRef.current) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
-      await addActivity({
+      await withTimeout(addActivity({
         lead_id: lead.id,
         user_id: appUser.id,
         type: activityType,
         note: activityNote.trim(),
-      });
+      }));
       setActivityNote('');
       setShowActivityForm(false);
       setActiveSection('activity');
-    } catch {
-      Alert.alert('Error', 'Failed to log activity');
+      showToast('success', 'Activity logged');
+    } catch (e: any) {
+      showToast('error', e?.message ?? 'Failed to log activity');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
-  }, [lead, activityType, activityNote, addActivity, appUser]);
+  }, [lead, activityType, activityNote, addActivity, appUser, showToast]);
 
   const handleCompleteFollowUp = useCallback(async (taskId: string) => {
     try {
-      await completeFollowUp(taskId);
-    } catch {
-      Alert.alert('Error', 'Failed to complete follow-up');
+      await withTimeout(completeFollowUp(taskId));
+      showToast('success', 'Follow-up completed');
+    } catch (e: any) {
+      showToast('error', e?.message ?? 'Failed to complete follow-up');
     }
-  }, [completeFollowUp]);
+  }, [completeFollowUp, showToast]);
 
   const handleCall = useCallback(() => {
     if (!lead) return;
@@ -222,6 +262,10 @@ export default function LeadDetailScreen() {
     router.push(`/follow-up?leadId=${lead.id}`);
   }, [lead, router]);
 
+  const handleGoHome = useCallback(() => {
+    router.replace('/');
+  }, [router]);
+
   if (!lead) {
     return (
       <View style={styles.centered}>
@@ -232,309 +276,330 @@ export default function LeadDetailScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: lead.full_name }} />
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <StatusBadge status={lead.status} />
-            {escalation && (
-              <View style={[styles.slaPill, { backgroundColor: escalation.bgColor }]}>
-                <View style={[styles.slaDot, { backgroundColor: escalation.color }]} />
-                <Text style={[styles.slaText, { color: escalation.color }]}>
-                  {escalation.label}
-                </Text>
+      <Stack.Screen
+        options={{
+          title: lead.full_name,
+          headerRight: () => (
+            <TouchableOpacity onPress={handleGoHome} style={styles.headerBtn} hitSlop={8}>
+              <Home size={20} color={Colors.primary} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
+      <View style={styles.wrapper}>
+        <ActionToast visible={toastVisible} type={toastType} message={toastMessage} onDismiss={dismissToast} />
+        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+          <View style={styles.header}>
+            <View style={styles.headerTop}>
+              <StatusBadge status={lead.status} />
+              {escalation && (
+                <View style={[styles.slaPill, { backgroundColor: escalation.bgColor }]}>
+                  <View style={[styles.slaDot, { backgroundColor: escalation.color }]} />
+                  <Text style={[styles.slaText, { color: escalation.color }]}>
+                    {escalation.label}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.leadName}>{lead.full_name}</Text>
+
+            <View style={styles.infoRows}>
+              <View style={styles.infoRow}>
+                <Phone size={14} color={Colors.textTertiary} />
+                <Text style={styles.infoText}>{formatPhone(lead.phone)}</Text>
               </View>
-            )}
+              {lead.email && (
+                <View style={styles.infoRow}>
+                  <Mail size={14} color={Colors.textTertiary} />
+                  <Text style={styles.infoText}>{lead.email}</Text>
+                </View>
+              )}
+              <View style={styles.infoRow}>
+                <MapPin size={14} color={Colors.textTertiary} />
+                <Text style={styles.infoText}>{lead.office} Office</Text>
+              </View>
+              {owner && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.ownerLabel}>Assigned:</Text>
+                  <Text style={styles.ownerName}>{owner.name}</Text>
+                </View>
+              )}
+              {lead.next_followup_at && (
+                <View style={styles.infoRow}>
+                  <Calendar size={14} color={Colors.warning} />
+                  <Text style={[styles.infoText, { color: Colors.warning }]}>
+                    Next: {formatDateTime(lead.next_followup_at)}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
 
-          <Text style={styles.leadName}>{lead.full_name}</Text>
-
-          <View style={styles.infoRows}>
-            <View style={styles.infoRow}>
-              <Phone size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoText}>{formatPhone(lead.phone)}</Text>
-            </View>
-            {lead.email && (
-              <View style={styles.infoRow}>
-                <Mail size={14} color={Colors.textTertiary} />
-                <Text style={styles.infoText}>{lead.email}</Text>
-              </View>
-            )}
-            <View style={styles.infoRow}>
-              <MapPin size={14} color={Colors.textTertiary} />
-              <Text style={styles.infoText}>{lead.office} Office</Text>
-            </View>
-            {owner && (
-              <View style={styles.infoRow}>
-                <Text style={styles.ownerLabel}>Assigned:</Text>
-                <Text style={styles.ownerName}>{owner.name}</Text>
-              </View>
-            )}
-            {lead.next_followup_at && (
-              <View style={styles.infoRow}>
-                <Calendar size={14} color={Colors.warning} />
-                <Text style={[styles.infoText, { color: Colors.warning }]}>
-                  Next: {formatDateTime(lead.next_followup_at)}
-                </Text>
-              </View>
-            )}
+          <View style={styles.quickActions}>
+            <TouchableOpacity style={styles.qaBtn} onPress={handleCall}>
+              <Phone size={18} color="#22C55E" />
+              <Text style={[styles.qaText, { color: '#22C55E' }]}>Call</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.qaBtn} onPress={handleWhatsApp}>
+              <MessageCircle size={18} color="#25D366" />
+              <Text style={[styles.qaText, { color: '#25D366' }]}>WhatsApp</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.qaBtn, styles.qaBtnAccent]} onPress={handleOpenComposer}>
+              <CalendarPlus size={18} color={Colors.primary} />
+              <Text style={[styles.qaText, { color: Colors.primary }]}>Follow-up</Text>
+            </TouchableOpacity>
           </View>
-        </View>
 
-        <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.qaBtn} onPress={handleCall}>
-            <Phone size={18} color="#22C55E" />
-            <Text style={[styles.qaText, { color: '#22C55E' }]}>Call</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.qaBtn} onPress={handleWhatsApp}>
-            <MessageCircle size={18} color="#25D366" />
-            <Text style={[styles.qaText, { color: '#25D366' }]}>WhatsApp</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.qaBtn, styles.qaBtnAccent]} onPress={handleOpenComposer}>
-            <CalendarPlus size={18} color={Colors.primary} />
-            <Text style={[styles.qaText, { color: Colors.primary }]}>Follow-up</Text>
-          </TouchableOpacity>
-        </View>
+          <View style={styles.actions}>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => setShowStatusPicker(!showStatusPicker)}>
+              <ChevronRight size={16} color={Colors.primary} />
+              <Text style={styles.actionText}>Change Status</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => setShowActivityForm(!showActivityForm)}>
+              <MessageCircle size={16} color={Colors.primary} />
+              <Text style={styles.actionText}>Log Activity</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn} onPress={startEdit}>
+              <Edit3 size={16} color={Colors.primary} />
+              <Text style={styles.actionText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => setShowStatusPicker(!showStatusPicker)}>
-            <ChevronRight size={16} color={Colors.primary} />
-            <Text style={styles.actionText}>Change Status</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => setShowActivityForm(!showActivityForm)}>
-            <MessageCircle size={16} color={Colors.primary} />
-            <Text style={styles.actionText}>Log Activity</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={startEdit}>
-            <Edit3 size={16} color={Colors.primary} />
-            <Text style={styles.actionText}>Edit</Text>
-          </TouchableOpacity>
-        </View>
-
-        {isEditing && (
-          <View style={styles.editForm}>
-            <View style={styles.editHeader}>
-              <Text style={styles.formTitle}>Edit Lead</Text>
-              <TouchableOpacity onPress={() => setIsEditing(false)}>
-                <X size={18} color={Colors.textTertiary} />
+          {isEditing && (
+            <View style={styles.editForm}>
+              <View style={styles.editHeader}>
+                <Text style={styles.formTitle}>Edit Lead</Text>
+                <TouchableOpacity onPress={() => { setIsEditing(false); setIsSubmitting(false); }}>
+                  <X size={18} color={Colors.textTertiary} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Name</Text>
+                <TextInput style={styles.editInput} value={editName} onChangeText={setEditName} placeholderTextColor={Colors.textTertiary} />
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Phone</Text>
+                <TextInput style={styles.editInput} value={editPhone} onChangeText={setEditPhone} keyboardType="phone-pad" placeholderTextColor={Colors.textTertiary} />
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Amount Due</Text>
+                <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Assigned To</Text>
+                <View style={styles.editChips}>
+                  <TouchableOpacity
+                    style={[styles.editChip, editOwnerId === null && styles.editChipActive]}
+                    onPress={() => setEditOwnerId(null)}
+                  >
+                    <Text style={[styles.editChipText, editOwnerId === null && styles.editChipTextActive]}>Unassigned</Text>
+                  </TouchableOpacity>
+                  {assignableUsers.map(u => (
+                    <TouchableOpacity
+                      key={u.id}
+                      style={[styles.editChip, editOwnerId === u.id && styles.editChipActive]}
+                      onPress={() => setEditOwnerId(u.id)}
+                    >
+                      <Text style={[styles.editChipText, editOwnerId === u.id && styles.editChipTextActive]}>{u.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Notes</Text>
+                <TextInput
+                  style={[styles.editInput, styles.editTextArea]}
+                  value={editNotes}
+                  onChangeText={setEditNotes}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                  placeholderTextColor={Colors.textTertiary}
+                />
+              </View>
+              <TouchableOpacity
+                style={[styles.saveBtn, isSubmitting && styles.saveBtnDisabled]}
+                onPress={handleSaveEdit}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color={Colors.white} size="small" />
+                ) : (
+                  <>
+                    <Save size={16} color={Colors.white} />
+                    <Text style={styles.saveBtnText}>Save Changes</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
-            <View style={styles.editField}>
-              <Text style={styles.editLabel}>Name</Text>
-              <TextInput style={styles.editInput} value={editName} onChangeText={setEditName} placeholderTextColor={Colors.textTertiary} />
-            </View>
-            <View style={styles.editField}>
-              <Text style={styles.editLabel}>Phone</Text>
-              <TextInput style={styles.editInput} value={editPhone} onChangeText={setEditPhone} keyboardType="phone-pad" placeholderTextColor={Colors.textTertiary} />
-            </View>
-            <View style={styles.editField}>
-              <Text style={styles.editLabel}>Amount Due</Text>
-              <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
-            </View>
-            <View style={styles.editField}>
-              <Text style={styles.editLabel}>Assigned To</Text>
-              <View style={styles.editChips}>
-                <TouchableOpacity
-                  style={[styles.editChip, editOwnerId === null && styles.editChipActive]}
-                  onPress={() => setEditOwnerId(null)}
-                >
-                  <Text style={[styles.editChipText, editOwnerId === null && styles.editChipTextActive]}>Unassigned</Text>
-                </TouchableOpacity>
-                {assignableUsers.map(u => (
+          )}
+
+          {showStatusPicker && (
+            <View style={styles.statusPicker}>
+              {isSubmitting && <ActivityIndicator color={Colors.primary} style={styles.loader} />}
+              {PIPELINE_STATUSES.map(status => {
+                const sc = StatusColors[status];
+                const isCurrentStatus = status === lead.status;
+                return (
                   <TouchableOpacity
-                    key={u.id}
-                    style={[styles.editChip, editOwnerId === u.id && styles.editChipActive]}
-                    onPress={() => setEditOwnerId(u.id)}
+                    key={status}
+                    style={[styles.statusOption, isCurrentStatus && styles.statusOptionCurrent]}
+                    onPress={() => !isCurrentStatus && handleStatusChange(status)}
+                    disabled={isCurrentStatus || isSubmitting}
                   >
-                    <Text style={[styles.editChipText, editOwnerId === u.id && styles.editChipTextActive]}>{u.name}</Text>
+                    <View style={[styles.statusOptionDot, { backgroundColor: sc?.dot ?? Colors.primary }]} />
+                    <Text style={[styles.statusOptionText, isCurrentStatus && { color: Colors.textTertiary }]}>{status}</Text>
+                    {isCurrentStatus && <Text style={styles.currentLabel}>current</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {showActivityForm && (
+            <View style={styles.activityForm}>
+              <Text style={styles.formTitle}>Log Activity</Text>
+              <View style={styles.typeChips}>
+                {ACTIVITY_TYPES.filter(t => t !== 'status_change' && t !== 'follow_up' && t !== 'reassignment' && t !== 'escalation').map(type => (
+                  <TouchableOpacity
+                    key={type}
+                    style={[styles.typeChip, activityType === type && styles.typeChipActive]}
+                    onPress={() => setActivityType(type)}
+                  >
+                    <Text style={[styles.typeChipText, activityType === type && styles.typeChipTextActive]}>{type}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
-            <View style={styles.editField}>
-              <Text style={styles.editLabel}>Notes</Text>
               <TextInput
-                style={[styles.editInput, styles.editTextArea]}
-                value={editNotes}
-                onChangeText={setEditNotes}
+                style={styles.noteInput}
+                value={activityNote}
+                onChangeText={setActivityNote}
+                placeholder="Add a note..."
+                placeholderTextColor={Colors.textTertiary}
                 multiline
                 numberOfLines={3}
                 textAlignVertical="top"
-                placeholderTextColor={Colors.textTertiary}
               />
+              <TouchableOpacity
+                style={[styles.submitBtn, (!activityNote.trim() || isSubmitting) && styles.submitBtnDisabled]}
+                onPress={handleAddActivity}
+                disabled={!activityNote.trim() || isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color={Colors.white} size="small" />
+                ) : (
+                  <Text style={styles.submitText}>Save Activity</Text>
+                )}
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[styles.saveBtn, isSubmitting && styles.saveBtnDisabled]}
-              onPress={handleSaveEdit}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={Colors.white} size="small" />
-              ) : (
-                <>
-                  <Save size={16} color={Colors.white} />
-                  <Text style={styles.saveBtnText}>Save Changes</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
+          )}
 
-        {showStatusPicker && (
-          <View style={styles.statusPicker}>
-            {isSubmitting && <ActivityIndicator color={Colors.primary} style={styles.loader} />}
-            {PIPELINE_STATUSES.map(status => {
-              const sc = StatusColors[status];
-              const isCurrentStatus = status === lead.status;
-              return (
-                <TouchableOpacity
-                  key={status}
-                  style={[styles.statusOption, isCurrentStatus && styles.statusOptionCurrent]}
-                  onPress={() => !isCurrentStatus && handleStatusChange(status)}
-                  disabled={isCurrentStatus || isSubmitting}
-                >
-                  <View style={[styles.statusOptionDot, { backgroundColor: sc?.dot ?? Colors.primary }]} />
-                  <Text style={[styles.statusOptionText, isCurrentStatus && { color: Colors.textTertiary }]}>{status}</Text>
-                  {isCurrentStatus && <Text style={styles.currentLabel}>current</Text>}
-                </TouchableOpacity>
-              );
-            })}
+          <View style={styles.tabs}>
+            {(['details', 'activity', 'followups', 'status'] as Section[]).map(section => (
+              <TouchableOpacity
+                key={section}
+                style={[styles.tab, activeSection === section && styles.tabActive]}
+                onPress={() => setActiveSection(section)}
+              >
+                <Text style={[styles.tabText, activeSection === section && styles.tabTextActive]}>
+                  {section === 'followups' ? 'Follow-ups' : section === 'status' ? 'Status' : section.charAt(0).toUpperCase() + section.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        )}
 
-        {showActivityForm && (
-          <View style={styles.activityForm}>
-            <Text style={styles.formTitle}>Log Activity</Text>
-            <View style={styles.typeChips}>
-              {ACTIVITY_TYPES.filter(t => t !== 'status_change' && t !== 'follow_up' && t !== 'reassignment' && t !== 'escalation').map(type => (
-                <TouchableOpacity
-                  key={type}
-                  style={[styles.typeChip, activityType === type && styles.typeChipActive]}
-                  onPress={() => setActivityType(type)}
-                >
-                  <Text style={[styles.typeChipText, activityType === type && styles.typeChipTextActive]}>{type}</Text>
-                </TouchableOpacity>
-              ))}
+          {activeSection === 'details' && (
+            <View style={styles.detailsSection}>
+              <DetailRow icon={<Clock size={14} color={Colors.textTertiary} />} label="Created" value={formatDateTime(lead.created_at)} />
+              <DetailRow icon={<Clock size={14} color={Colors.textTertiary} />} label="Last Touch" value={formatDateTime(lead.last_touch_at)} />
+              {lead.quoted_at && <DetailRow icon={<Calendar size={14} color={Colors.info} />} label="Quoted" value={formatDateTime(lead.quoted_at)} />}
+              {lead.closed_at && <DetailRow icon={<CheckCircle size={14} color={Colors.success} />} label="Closed" value={formatDateTime(lead.closed_at)} />}
+              {lead.next_followup_at && <DetailRow icon={<Calendar size={14} color={Colors.warning} />} label="Next Follow-up" value={formatDateTime(lead.next_followup_at)} />}
+              {lead.premium_amount != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Premium" value={formatCurrency(lead.premium_amount)} />}
+              {lead.amount_due != null && <DetailRow icon={<DollarSign size={14} color={Colors.primary} />} label="Le quedó en" value={formatCurrency(lead.amount_due)} />}
+              {lead.down_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.info} />} label="Down Payment" value={formatCurrency(lead.down_payment)} />}
+              {lead.monthly_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.warning} />} label="Monthly" value={formatCurrency(lead.monthly_payment)} />}
+              {lead.total_premium != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Total Premium" value={formatCurrency(lead.total_premium)} />}
+              {lead.quote_price != null && <DetailRow icon={<DollarSign size={14} color={Colors.cyan} />} label="Quote Price" value={formatCurrency(lead.quote_price)} />}
+              {lead.carrier && <DetailRow icon={<FileText size={14} color={Colors.textTertiary} />} label="Carrier" value={lead.carrier} />}
+              {lead.effective_date && <DetailRow icon={<Calendar size={14} color={Colors.success} />} label="Effective Date" value={lead.effective_date} />}
+              {lead.renewal_date && <DetailRow icon={<Calendar size={14} color={Colors.info} />} label="Renewal" value={formatDate(lead.renewal_date)} />}
+              {lead.notes ? (
+                <View style={styles.notesBox}>
+                  <FileText size={14} color={Colors.textTertiary} />
+                  <Text style={styles.notesText}>{lead.notes}</Text>
+                </View>
+              ) : null}
             </View>
-            <TextInput
-              style={styles.noteInput}
-              value={activityNote}
-              onChangeText={setActivityNote}
-              placeholder="Add a note..."
-              placeholderTextColor={Colors.textTertiary}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-            <TouchableOpacity
-              style={[styles.submitBtn, (!activityNote.trim() || isSubmitting) && styles.submitBtnDisabled]}
-              onPress={handleAddActivity}
-              disabled={!activityNote.trim() || isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={Colors.white} size="small" />
+          )}
+
+          {activeSection === 'activity' && (
+            <View>
+              {leadActivities.length === 0 ? (
+                <Text style={styles.emptyTabText}>No activity recorded yet</Text>
               ) : (
-                <Text style={styles.submitText}>Save Activity</Text>
+                leadActivities.map(a => <ActivityItem key={a.id} activity={a} />)
               )}
-            </TouchableOpacity>
-          </View>
-        )}
+            </View>
+          )}
 
-        <View style={styles.tabs}>
-          {(['details', 'activity', 'followups'] as Section[]).map(section => (
-            <TouchableOpacity
-              key={section}
-              style={[styles.tab, activeSection === section && styles.tabActive]}
-              onPress={() => setActiveSection(section)}
-            >
-              <Text style={[styles.tabText, activeSection === section && styles.tabTextActive]}>
-                {section === 'followups' ? 'Follow-ups' : section.charAt(0).toUpperCase() + section.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {activeSection === 'details' && (
-          <View style={styles.detailsSection}>
-            <DetailRow icon={<Clock size={14} color={Colors.textTertiary} />} label="Created" value={formatDateTime(lead.created_at)} />
-            <DetailRow icon={<Clock size={14} color={Colors.textTertiary} />} label="Last Touch" value={formatDateTime(lead.last_touch_at)} />
-            {lead.quoted_at && <DetailRow icon={<Calendar size={14} color={Colors.info} />} label="Quoted" value={formatDateTime(lead.quoted_at)} />}
-            {lead.closed_at && <DetailRow icon={<CheckCircle size={14} color={Colors.success} />} label="Closed" value={formatDateTime(lead.closed_at)} />}
-            {lead.next_followup_at && <DetailRow icon={<Calendar size={14} color={Colors.warning} />} label="Next Follow-up" value={formatDateTime(lead.next_followup_at)} />}
-            {lead.premium_amount != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Premium" value={formatCurrency(lead.premium_amount)} />}
-            {lead.amount_due != null && <DetailRow icon={<DollarSign size={14} color={Colors.primary} />} label="Le quedó en" value={formatCurrency(lead.amount_due)} />}
-            {lead.down_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.info} />} label="Down Payment" value={formatCurrency(lead.down_payment)} />}
-            {lead.monthly_payment != null && <DetailRow icon={<DollarSign size={14} color={Colors.warning} />} label="Monthly" value={formatCurrency(lead.monthly_payment)} />}
-            {lead.total_premium != null && <DetailRow icon={<DollarSign size={14} color={Colors.success} />} label="Total Premium" value={formatCurrency(lead.total_premium)} />}
-            {lead.quote_price != null && <DetailRow icon={<DollarSign size={14} color={Colors.cyan} />} label="Quote Price" value={formatCurrency(lead.quote_price)} />}
-            {lead.carrier && <DetailRow icon={<FileText size={14} color={Colors.textTertiary} />} label="Carrier" value={lead.carrier} />}
-            {lead.effective_date && <DetailRow icon={<Calendar size={14} color={Colors.success} />} label="Effective Date" value={lead.effective_date} />}
-            {lead.renewal_date && <DetailRow icon={<Calendar size={14} color={Colors.info} />} label="Renewal" value={formatDate(lead.renewal_date)} />}
-            {lead.notes ? (
-              <View style={styles.notesBox}>
-                <FileText size={14} color={Colors.textTertiary} />
-                <Text style={styles.notesText}>{lead.notes}</Text>
-              </View>
-            ) : null}
-          </View>
-        )}
-
-        {activeSection === 'activity' && (
-          <View>
-            {leadActivities.length === 0 ? (
-              <Text style={styles.emptyTabText}>No activity recorded yet</Text>
-            ) : (
-              leadActivities.map(a => <ActivityItem key={a.id} activity={a} />)
-            )}
-          </View>
-        )}
-
-        {activeSection === 'followups' && (
-          <View style={styles.followUpsSection}>
-            {leadFollowUps.length === 0 ? (
-              <Text style={styles.emptyTabText}>No follow-ups scheduled</Text>
-            ) : (
-              leadFollowUps
-                .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
-                .map(task => {
-                  const isOverdue = !task.completed && new Date(task.scheduled_at) < new Date();
-                  return (
-                    <View key={task.id} style={[styles.followUpRow, task.completed && styles.followUpDone]}>
-                      <TouchableOpacity
-                        onPress={() => !task.completed && handleCompleteFollowUp(task.id)}
-                        disabled={task.completed}
-                        style={styles.followUpCheck}
-                      >
-                        {task.completed ? (
-                          <CheckCircle size={20} color={Colors.success} />
-                        ) : isOverdue ? (
-                          <XCircle size={20} color={Colors.danger} />
-                        ) : (
-                          <View style={styles.unchecked} />
-                        )}
-                      </TouchableOpacity>
-                      <View style={styles.followUpInfo}>
-                        <Text style={[
-                          styles.followUpDate,
-                          task.completed && styles.followUpDateDone,
-                          isOverdue && !task.completed && { color: Colors.danger },
-                        ]}>
-                          {formatDateTime(task.scheduled_at)}
-                        </Text>
-                        {isOverdue && !task.completed && <Text style={styles.overdueLabel}>OVERDUE</Text>}
-                        {task.completed && task.completed_at && (
-                          <Text style={styles.completedLabel}>Done {formatDateTime(task.completed_at)}</Text>
-                        )}
+          {activeSection === 'followups' && (
+            <View style={styles.followUpsSection}>
+              {leadFollowUps.length === 0 ? (
+                <Text style={styles.emptyTabText}>No follow-ups scheduled</Text>
+              ) : (
+                leadFollowUps
+                  .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
+                  .map(task => {
+                    const isOverdue = !task.completed && new Date(task.scheduled_at) < new Date();
+                    return (
+                      <View key={task.id} style={[styles.followUpRow, task.completed && styles.followUpDone]}>
+                        <TouchableOpacity
+                          onPress={() => !task.completed && handleCompleteFollowUp(task.id)}
+                          disabled={task.completed}
+                          style={styles.followUpCheck}
+                        >
+                          {task.completed ? (
+                            <CheckCircle size={20} color={Colors.success} />
+                          ) : isOverdue ? (
+                            <XCircle size={20} color={Colors.danger} />
+                          ) : (
+                            <View style={styles.unchecked} />
+                          )}
+                        </TouchableOpacity>
+                        <View style={styles.followUpInfo}>
+                          <Text style={[
+                            styles.followUpDate,
+                            task.completed && styles.followUpDateDone,
+                            isOverdue && !task.completed && { color: Colors.danger },
+                          ]}>
+                            {formatDateTime(task.scheduled_at)}
+                          </Text>
+                          {isOverdue && !task.completed && <Text style={styles.overdueLabel}>OVERDUE</Text>}
+                          {task.completed && task.completed_at && (
+                            <Text style={styles.completedLabel}>Done {formatDateTime(task.completed_at)}</Text>
+                          )}
+                        </View>
                       </View>
-                    </View>
-                  );
-                })
-            )}
-          </View>
-        )}
+                    );
+                  })
+              )}
+            </View>
+          )}
 
-        <View style={styles.bottomPad} />
-      </ScrollView>
+          {activeSection === 'status' && (
+            <ObservabilityPanel
+              lead={lead}
+              activities={allActivities}
+              followUps={allFollowUps}
+              lastActionResult={lastActionResult}
+            />
+          )}
+
+          <View style={styles.bottomPad} />
+        </ScrollView>
+      </View>
     </>
   );
 }
@@ -550,9 +615,11 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
 }
 
 const styles = StyleSheet.create({
+  wrapper: { flex: 1, backgroundColor: Colors.background },
   container: { flex: 1, backgroundColor: Colors.background },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   errorText: { color: Colors.textSecondary, fontSize: 16 },
+  headerBtn: { padding: 4 },
   header: { padding: 20, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   slaPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 5 },

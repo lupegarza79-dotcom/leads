@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,8 @@ import {
   Zap,
   Send,
   Calendar,
+  ArrowLeft,
+  Home,
 } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import {
@@ -35,6 +37,8 @@ import { useLeads } from '@/providers/LeadsProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { addBusinessDays } from '@/utils/business-hours';
 import { getWhatsAppUrl, getDialerUrl, formatPhone } from '@/utils/formatters';
+import { ActionToast, type ToastType } from '@/components/ActionToast';
+import { withTimeout } from '@/utils/with-timeout';
 
 const CHANNEL_CONFIG: Record<FollowUpChannel, { icon: React.ElementType; color: string; label: string }> = {
   call: { icon: Phone, color: '#22C55E', label: 'Call' },
@@ -100,6 +104,20 @@ export default function FollowUpComposerScreen() {
   const [manualDate, setManualDate] = useState('');
   const [manualTime, setManualTime] = useState('');
 
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastType, setToastType] = useState<ToastType>('success');
+  const [toastMessage, setToastMessage] = useState('');
+
+  const submittingRef = useRef(false);
+
+  const showToast = useCallback((type: ToastType, message: string) => {
+    setToastType(type);
+    setToastMessage(message);
+    setToastVisible(true);
+  }, []);
+
+  const dismissToast = useCallback(() => setToastVisible(false), []);
+
   const assignableUsers = useMemo(() => {
     return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
   }, [mgUsers]);
@@ -151,6 +169,18 @@ export default function FollowUpComposerScreen() {
     return parts.join(' | ');
   }, [selectedDate, channel, priority, reason, notes]);
 
+  const handleGoBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  }, [router]);
+
+  const handleGoHome = useCallback(() => {
+    router.replace('/');
+  }, [router]);
+
   const handleSave = useCallback(async (action: 'save' | 'save_log' | 'save_whatsapp' | 'save_call') => {
     if (!lead || !selectedDate) {
       Alert.alert('Required', 'Please select a follow-up date/time');
@@ -160,7 +190,9 @@ export default function FollowUpComposerScreen() {
       Alert.alert('Error', 'No authenticated user');
       return;
     }
+    if (submittingRef.current) return;
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
       console.log('[FollowUp] Saving follow-up for lead:', lead.id, 'at:', selectedDate.toISOString());
@@ -172,24 +204,24 @@ export default function FollowUpComposerScreen() {
         updates.owner_id = assignedTo;
       }
 
-      await updateLead({ id: lead.id, updates: updates as any });
+      await withTimeout(updateLead({ id: lead.id, updates: updates as any }));
 
       if (action !== 'save') {
-        await addActivity({
+        await withTimeout(addActivity({
           lead_id: lead.id,
           user_id: appUser.id,
           type: 'note',
           note: `[FOLLOW-UP] ${buildActivityNote()}`,
-        });
+        }));
       }
 
       if (assignedTo && assignedTo !== lead.owner_id) {
-        await addActivity({
+        await withTimeout(addActivity({
           lead_id: lead.id,
           user_id: appUser.id,
           type: 'note',
           note: `[REASSIGNMENT] Reassigned lead with follow-up`,
-        });
+        }));
       }
 
       console.log('[FollowUp] Follow-up saved successfully');
@@ -210,250 +242,280 @@ export default function FollowUpComposerScreen() {
         });
       }
 
-      router.back();
+      showToast('success', 'Follow-up saved');
+      setTimeout(() => {
+        handleGoBack();
+      }, 600);
     } catch (e: any) {
       console.log('[FollowUp] Error saving:', e?.message);
-      Alert.alert('Error', e?.message ?? 'Failed to save follow-up');
+      showToast('error', e?.message ?? 'Failed to save follow-up');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
-  }, [lead, selectedDate, assignedTo, appUser, updateLead, addActivity, buildActivityNote, router]);
+  }, [lead, selectedDate, assignedTo, appUser, updateLead, addActivity, buildActivityNote, showToast, handleGoBack]);
 
   if (!lead) {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>Lead not found</Text>
+        <TouchableOpacity style={styles.goHomeBtn} onPress={handleGoHome}>
+          <Home size={16} color={Colors.white} />
+          <Text style={styles.goHomeBtnText}>Go to Pipeline</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   return (
     <>
-      <Stack.Screen options={{ title: `Follow-up: ${lead.full_name}` }} />
+      <Stack.Screen
+        options={{
+          title: `Follow-up: ${lead.full_name}`,
+          headerLeft: () => (
+            <TouchableOpacity onPress={handleGoBack} style={styles.headerBackBtn} hitSlop={8}>
+              <ArrowLeft size={22} color={Colors.primary} />
+              <Text style={styles.headerBackText}>Back</Text>
+            </TouchableOpacity>
+          ),
+          headerRight: () => (
+            <TouchableOpacity onPress={handleGoHome} style={styles.headerHomeBtn} hitSlop={8}>
+              <Home size={20} color={Colors.primary} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
-          style={styles.container}
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.leadSummary}>
-            <Text style={styles.leadName}>{lead.full_name}</Text>
-            <Text style={styles.leadPhone}>{formatPhone(lead.phone)}</Text>
-            {lead.next_followup_at && (
-              <Text style={styles.currentFu}>
-                Current: {formatPickerDateTime(new Date(lead.next_followup_at))}
-              </Text>
-            )}
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>When</Text>
-            <View style={styles.presetsRow}>
-              {quickPresets.map((preset, idx) => {
-                const isActive = selectedDate?.getTime() === preset.value.getTime();
-                const IconComp = preset.icon;
-                return (
-                  <TouchableOpacity
-                    key={idx}
-                    style={[styles.presetBtn, isActive && styles.presetBtnActive]}
-                    onPress={() => handlePresetSelect(preset.value)}
-                  >
-                    <IconComp size={13} color={isActive ? Colors.primary : Colors.textTertiary} />
-                    <Text style={[styles.presetText, isActive && styles.presetTextActive]}>
-                      {preset.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+        <View style={styles.flex}>
+          <ActionToast visible={toastVisible} type={toastType} message={toastMessage} onDismiss={dismissToast} />
+          <ScrollView
+            style={styles.container}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.leadSummary}>
+              <Text style={styles.leadName}>{lead.full_name}</Text>
+              <Text style={styles.leadPhone}>{formatPhone(lead.phone)}</Text>
+              {lead.next_followup_at && (
+                <Text style={styles.currentFu}>
+                  Current: {formatPickerDateTime(new Date(lead.next_followup_at))}
+                </Text>
+              )}
             </View>
 
-            <View style={styles.manualRow}>
-              <TextInput
-                style={[styles.manualInput, styles.manualInputDate]}
-                value={manualDate}
-                onChangeText={setManualDate}
-                placeholder="MM/DD"
-                placeholderTextColor={Colors.textTertiary}
-                keyboardType="numbers-and-punctuation"
-              />
-              <TextInput
-                style={[styles.manualInput, styles.manualInputTime]}
-                value={manualTime}
-                onChangeText={setManualTime}
-                placeholder="HH:MM"
-                placeholderTextColor={Colors.textTertiary}
-                keyboardType="numbers-and-punctuation"
-              />
-              <TouchableOpacity style={styles.manualApplyBtn} onPress={handleManualDateApply}>
-                <Text style={styles.manualApplyText}>Set</Text>
-              </TouchableOpacity>
-            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>When</Text>
+              <View style={styles.presetsRow}>
+                {quickPresets.map((preset, idx) => {
+                  const isActive = selectedDate?.getTime() === preset.value.getTime();
+                  const IconComp = preset.icon;
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.presetBtn, isActive && styles.presetBtnActive]}
+                      onPress={() => handlePresetSelect(preset.value)}
+                    >
+                      <IconComp size={13} color={isActive ? Colors.primary : Colors.textTertiary} />
+                      <Text style={[styles.presetText, isActive && styles.presetTextActive]}>
+                        {preset.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
-            {selectedDate && (
-              <View style={styles.selectedBox}>
-                <Calendar size={14} color={Colors.primary} />
-                <Text style={styles.selectedText}>{formatPickerDateTime(selectedDate)}</Text>
-                <TouchableOpacity onPress={() => setSelectedDate(null)}>
-                  <Text style={styles.clearText}>Clear</Text>
+              <View style={styles.manualRow}>
+                <TextInput
+                  style={[styles.manualInput, styles.manualInputDate]}
+                  value={manualDate}
+                  onChangeText={setManualDate}
+                  placeholder="MM/DD"
+                  placeholderTextColor={Colors.textTertiary}
+                  keyboardType="numbers-and-punctuation"
+                />
+                <TextInput
+                  style={[styles.manualInput, styles.manualInputTime]}
+                  value={manualTime}
+                  onChangeText={setManualTime}
+                  placeholder="HH:MM"
+                  placeholderTextColor={Colors.textTertiary}
+                  keyboardType="numbers-and-punctuation"
+                />
+                <TouchableOpacity style={styles.manualApplyBtn} onPress={handleManualDateApply}>
+                  <Text style={styles.manualApplyText}>Set</Text>
                 </TouchableOpacity>
               </View>
-            )}
-          </View>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Channel</Text>
-            <View style={styles.chipsRow}>
-              {FOLLOW_UP_CHANNELS.map(ch => {
-                const config = CHANNEL_CONFIG[ch];
-                const isActive = channel === ch;
-                const IconComp = config.icon;
-                return (
-                  <TouchableOpacity
-                    key={ch}
-                    style={[styles.channelChip, isActive && { backgroundColor: config.color + '1A', borderColor: config.color + '55' }]}
-                    onPress={() => setChannel(ch)}
-                  >
-                    <IconComp size={14} color={isActive ? config.color : Colors.textTertiary} />
-                    <Text style={[styles.chipLabel, isActive && { color: config.color }]}>
-                      {config.label}
-                    </Text>
+              {selectedDate && (
+                <View style={styles.selectedBox}>
+                  <Calendar size={14} color={Colors.primary} />
+                  <Text style={styles.selectedText}>{formatPickerDateTime(selectedDate)}</Text>
+                  <TouchableOpacity onPress={() => setSelectedDate(null)}>
+                    <Text style={styles.clearText}>Clear</Text>
                   </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Priority</Text>
-            <View style={styles.chipsRow}>
-              {FOLLOW_UP_PRIORITIES.map(p => {
-                const config = PRIORITY_CONFIG[p];
-                const isActive = priority === p;
-                return (
-                  <TouchableOpacity
-                    key={p}
-                    style={[styles.priorityChip, isActive && { backgroundColor: config.color + '1A', borderColor: config.color + '55' }]}
-                    onPress={() => setPriority(p)}
-                  >
-                    {p === 'critical' && <AlertTriangle size={12} color={isActive ? config.color : Colors.textTertiary} />}
-                    <Text style={[styles.chipLabel, isActive && { color: config.color }]}>
-                      {config.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Reason</Text>
-            <View style={styles.chipsRow}>
-              {FOLLOW_UP_REASONS.map(r => {
-                const isActive = reason === r;
-                return (
-                  <TouchableOpacity
-                    key={r}
-                    style={[styles.reasonChip, isActive && styles.reasonChipActive]}
-                    onPress={() => setReason(r)}
-                  >
-                    <Text style={[styles.chipLabel, isActive && styles.chipLabelActive]}>
-                      {r}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Assigned To</Text>
-            <View style={styles.chipsRow}>
-              {assignableUsers.map(u => {
-                const isActive = assignedTo === u.id;
-                return (
-                  <TouchableOpacity
-                    key={u.id}
-                    style={[styles.reasonChip, isActive && styles.reasonChipActive]}
-                    onPress={() => setAssignedTo(u.id)}
-                  >
-                    <Text style={[styles.chipLabel, isActive && styles.chipLabelActive]}>
-                      {u.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Notes</Text>
-            <TextInput
-              style={styles.notesInput}
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Add notes about this follow-up..."
-              placeholderTextColor={Colors.textTertiary}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-          </View>
-
-          <View style={styles.actionsSection}>
-            <TouchableOpacity
-              style={[styles.actionBtnPrimary, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
-              onPress={() => handleSave('save_log')}
-              disabled={!selectedDate || isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={Colors.white} size="small" />
-              ) : (
-                <>
-                  <Send size={16} color={Colors.white} />
-                  <Text style={styles.actionBtnPrimaryText}>Save + Log Activity</Text>
-                </>
+                </View>
               )}
-            </TouchableOpacity>
+            </View>
 
-            <View style={styles.secondaryActions}>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Channel</Text>
+              <View style={styles.chipsRow}>
+                {FOLLOW_UP_CHANNELS.map(ch => {
+                  const config = CHANNEL_CONFIG[ch];
+                  const isActive = channel === ch;
+                  const IconComp = config.icon;
+                  return (
+                    <TouchableOpacity
+                      key={ch}
+                      style={[styles.channelChip, isActive && { backgroundColor: config.color + '1A', borderColor: config.color + '55' }]}
+                      onPress={() => setChannel(ch)}
+                    >
+                      <IconComp size={14} color={isActive ? config.color : Colors.textTertiary} />
+                      <Text style={[styles.chipLabel, isActive && { color: config.color }]}>
+                        {config.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Priority</Text>
+              <View style={styles.chipsRow}>
+                {FOLLOW_UP_PRIORITIES.map(p => {
+                  const config = PRIORITY_CONFIG[p];
+                  const isActive = priority === p;
+                  return (
+                    <TouchableOpacity
+                      key={p}
+                      style={[styles.priorityChip, isActive && { backgroundColor: config.color + '1A', borderColor: config.color + '55' }]}
+                      onPress={() => setPriority(p)}
+                    >
+                      {p === 'critical' && <AlertTriangle size={12} color={isActive ? config.color : Colors.textTertiary} />}
+                      <Text style={[styles.chipLabel, isActive && { color: config.color }]}>
+                        {config.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Reason</Text>
+              <View style={styles.chipsRow}>
+                {FOLLOW_UP_REASONS.map(r => {
+                  const isActive = reason === r;
+                  return (
+                    <TouchableOpacity
+                      key={r}
+                      style={[styles.reasonChip, isActive && styles.reasonChipActive]}
+                      onPress={() => setReason(r)}
+                    >
+                      <Text style={[styles.chipLabel, isActive && styles.chipLabelActive]}>
+                        {r}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Assigned To</Text>
+              <View style={styles.chipsRow}>
+                {assignableUsers.map(u => {
+                  const isActive = assignedTo === u.id;
+                  return (
+                    <TouchableOpacity
+                      key={u.id}
+                      style={[styles.reasonChip, isActive && styles.reasonChipActive]}
+                      onPress={() => setAssignedTo(u.id)}
+                    >
+                      <Text style={[styles.chipLabel, isActive && styles.chipLabelActive]}>
+                        {u.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Notes</Text>
+              <TextInput
+                style={styles.notesInput}
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Add notes about this follow-up..."
+                placeholderTextColor={Colors.textTertiary}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+            </View>
+
+            <View style={styles.actionsSection}>
               <TouchableOpacity
-                style={[styles.actionBtnSecondary, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
-                onPress={() => handleSave('save')}
+                style={[styles.actionBtnPrimary, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
+                onPress={() => handleSave('save_log')}
                 disabled={!selectedDate || isSubmitting}
               >
-                <Text style={styles.actionBtnSecondaryText}>Save Only</Text>
+                {isSubmitting ? (
+                  <ActivityIndicator color={Colors.white} size="small" />
+                ) : (
+                  <>
+                    <Send size={16} color={Colors.white} />
+                    <Text style={styles.actionBtnPrimaryText}>Save + Log Activity</Text>
+                  </>
+                )}
               </TouchableOpacity>
 
-              {channel === 'whatsapp' && (
+              <View style={styles.secondaryActions}>
                 <TouchableOpacity
-                  style={[styles.actionBtnWhatsApp, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
-                  onPress={() => handleSave('save_whatsapp')}
+                  style={[styles.actionBtnSecondary, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
+                  onPress={() => handleSave('save')}
                   disabled={!selectedDate || isSubmitting}
                 >
-                  <MessageCircle size={14} color="#FFFFFF" />
-                  <Text style={styles.actionBtnWhatsAppText}>Save + WhatsApp</Text>
+                  <Text style={styles.actionBtnSecondaryText}>Save Only</Text>
                 </TouchableOpacity>
-              )}
 
-              {channel === 'call' && (
-                <TouchableOpacity
-                  style={[styles.actionBtnCall, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
-                  onPress={() => handleSave('save_call')}
-                  disabled={!selectedDate || isSubmitting}
-                >
-                  <Phone size={14} color="#FFFFFF" />
-                  <Text style={styles.actionBtnCallText}>Save + Call</Text>
-                </TouchableOpacity>
-              )}
+                {channel === 'whatsapp' && (
+                  <TouchableOpacity
+                    style={[styles.actionBtnWhatsApp, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
+                    onPress={() => handleSave('save_whatsapp')}
+                    disabled={!selectedDate || isSubmitting}
+                  >
+                    <MessageCircle size={14} color="#FFFFFF" />
+                    <Text style={styles.actionBtnWhatsAppText}>Save + WhatsApp</Text>
+                  </TouchableOpacity>
+                )}
+
+                {channel === 'call' && (
+                  <TouchableOpacity
+                    style={[styles.actionBtnCall, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
+                    onPress={() => handleSave('save_call')}
+                    disabled={!selectedDate || isSubmitting}
+                  >
+                    <Phone size={14} color="#FFFFFF" />
+                    <Text style={styles.actionBtnCallText}>Save + Call</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
-          </View>
 
-          <View style={styles.bottomPad} />
-        </ScrollView>
+            <TouchableOpacity style={styles.cancelBtn} onPress={handleGoBack}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+
+            <View style={styles.bottomPad} />
+          </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </>
   );
@@ -463,8 +525,30 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { flex: 1, backgroundColor: Colors.background },
   content: { paddingHorizontal: 20, paddingTop: 12 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background, gap: 16 },
   errorText: { color: Colors.textSecondary, fontSize: 16 },
+  goHomeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: Colors.primary,
+  },
+  goHomeBtnText: { color: Colors.white, fontSize: 14, fontWeight: '600' as const },
+  headerBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingRight: 8,
+  },
+  headerBackText: {
+    color: Colors.primary,
+    fontSize: 15,
+    fontWeight: '500' as const,
+  },
+  headerHomeBtn: { padding: 4 },
   leadSummary: {
     backgroundColor: Colors.surface,
     borderRadius: 12,
@@ -638,5 +722,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#22C55E',
   },
   actionBtnCallText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' as const },
+  cancelBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    marginTop: 10,
+    borderRadius: 10,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  cancelBtnText: { color: Colors.textSecondary, fontSize: 14, fontWeight: '600' as const },
   bottomPad: { height: 40 },
 });

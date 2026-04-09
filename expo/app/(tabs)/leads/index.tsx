@@ -6,7 +6,6 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, Plus, Filter, X, Users } from 'lucide-react-native';
@@ -17,8 +16,10 @@ import { useLeads } from '@/providers/LeadsProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { LeadCard } from '@/components/LeadCard';
 import { EmptyState } from '@/components/EmptyState';
+import { ActionToast, type ToastType } from '@/components/ActionToast';
 import { useResponsive } from '@/hooks/useResponsive';
 import { addBusinessDays } from '@/utils/business-hours';
+import { withTimeout } from '@/utils/with-timeout';
 import type { Lead } from '@/types/leads';
 
 export default function LeadsScreen() {
@@ -55,33 +56,43 @@ export default function LeadsScreen() {
     router.push(`/lead/${id}`);
   }, [router]);
 
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastType, setToastType] = useState<ToastType>('success');
+  const [toastMsg, setToastMsg] = useState('');
+
+  const showToast = useCallback((type: ToastType, msg: string) => {
+    setToastType(type);
+    setToastMsg(msg);
+    setToastVisible(true);
+  }, []);
+
   const handleMarkContacted = useCallback(async (id: string) => {
     try {
-      await changeStatus({ id, status: 'Contacted', userId: appUser?.id ?? 'system' });
-      Alert.alert('Done', 'Lead marked as Contacted.');
+      await withTimeout(changeStatus({ id, status: 'Contacted', userId: appUser?.id ?? 'system' }));
+      showToast('success', 'Lead marked as Contacted');
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Failed to update lead.');
+      showToast('error', e?.message ?? 'Failed to update lead');
     }
-  }, [changeStatus, appUser]);
+  }, [changeStatus, appUser, showToast]);
 
   const handleSetFollowUp = useCallback(async (id: string) => {
     try {
       const nextBizDay = addBusinessDays(new Date(), 1);
       nextBizDay.setHours(10, 0, 0, 0);
-      await updateLead({ id, updates: { next_followup_at: nextBizDay.toISOString() } });
+      await withTimeout(updateLead({ id, updates: { next_followup_at: nextBizDay.toISOString() } }));
       if (appUser?.id) {
-        await addActivity({
+        await withTimeout(addActivity({
           lead_id: id,
           user_id: appUser.id,
           type: 'note',
           note: `Follow-up set to ${nextBizDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} 10:00 AM`,
-        });
+        }));
       }
-      Alert.alert('Done', 'Follow-up set for next business day 10am.');
+      showToast('success', 'Follow-up set for next biz day 10am');
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Failed to set follow-up.');
+      showToast('error', e?.message ?? 'Failed to set follow-up');
     }
-  }, [updateLead, addActivity, appUser]);
+  }, [updateLead, addActivity, appUser, showToast]);
 
   const handleOpenComposer = useCallback((id: string) => {
     router.push(`/follow-up?leadId=${id}`);
@@ -105,6 +116,7 @@ export default function LeadsScreen() {
 
   return (
     <View style={styles.container}>
+      <ActionToast visible={toastVisible} type={toastType} message={toastMsg} onDismiss={() => setToastVisible(false)} />
       <View style={[styles.searchRow, isWide && styles.searchRowWide]}>
         <View style={[styles.searchBar, isWide && styles.searchBarWide]}>
           <Search size={16} color={Colors.textTertiary} />
