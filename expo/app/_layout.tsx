@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
-import { View, ActivityIndicator, StyleSheet } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { LeadsProvider } from "@/providers/LeadsProvider";
@@ -13,27 +13,59 @@ void SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, signOut } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (!isLoading) {
+      setLoadingTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      console.log('[AuthGate] Loading timed out after 8s');
+      setLoadingTimedOut(true);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
+  useEffect(() => {
+    if (isLoading && !loadingTimedOut) return;
 
     const inLoginScreen = segments[0] === 'login';
-    if (!isAuthenticated && !inLoginScreen) {
+    const effectiveAuth = loadingTimedOut ? false : isAuthenticated;
+
+    if (!effectiveAuth && !inLoginScreen) {
       console.log('[AuthGate] Not authenticated, redirecting to login');
       router.replace('/login');
     } else if (isAuthenticated && inLoginScreen) {
       console.log('[AuthGate] Authenticated, redirecting to home');
       router.replace('/');
     }
-  }, [isAuthenticated, isLoading, segments, router]);
+  }, [isAuthenticated, isLoading, loadingTimedOut, segments, router]);
 
-  if (isLoading) {
+  if (isLoading && !loadingTimedOut) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
+
+  if (loadingTimedOut && isLoading) {
+    return (
+      <View style={styles.loading}>
+        <Text style={styles.timeoutText}>Taking too long to load...</Text>
+        <TouchableOpacity
+          style={styles.timeoutBtn}
+          onPress={() => {
+            signOut().catch(() => {});
+            router.replace('/login');
+          }}
+        >
+          <Text style={styles.timeoutBtnText}>Go to Login</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -121,5 +153,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.background,
+  },
+  timeoutText: {
+    color: Colors.textSecondary,
+    fontSize: 15,
+    marginBottom: 16,
+  },
+  timeoutBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  timeoutBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600' as const,
   },
 });

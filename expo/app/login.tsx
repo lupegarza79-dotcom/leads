@@ -91,15 +91,23 @@ export default function LoginScreen() {
     }
     setError(null);
 
+    const verifyTimeout = setTimeout(() => {
+      console.log('[Login] Verify timed out after 15s, checking session...');
+      setError('Verification is taking too long. Please try again.');
+    }, 15000);
+
     try {
       await verifyOtp(trimmed, code);
-      console.log('[Login] OTP verified successfully');
+      clearTimeout(verifyTimeout);
+      console.log('[Login] OTP verified successfully, navigating to /');
+      router.replace('/');
     } catch (e: any) {
+      clearTimeout(verifyTimeout);
       console.log('[Login] Verify OTP error:', e);
       const msg = e?.message ?? 'Verification failed. Please check your code and try again.';
       setError(msg);
     }
-  }, [email, otpCode, verifyOtp]);
+  }, [email, otpCode, verifyOtp, router]);
 
   const handleResend = useCallback(async () => {
     if (resendCooldown > 0) return;
