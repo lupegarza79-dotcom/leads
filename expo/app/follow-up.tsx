@@ -178,8 +178,8 @@ export default function FollowUpComposerScreen() {
         await addActivity({
           lead_id: lead.id,
           user_id: appUser.id,
-          type: 'follow_up',
-          note: buildActivityNote(),
+          type: 'note',
+          note: `[FOLLOW-UP] ${buildActivityNote()}`,
         });
       }
 
@@ -187,8 +187,8 @@ export default function FollowUpComposerScreen() {
         await addActivity({
           lead_id: lead.id,
           user_id: appUser.id,
-          type: 'reassignment',
-          note: `Reassigned lead with follow-up`,
+          type: 'note',
+          note: `[REASSIGNMENT] Reassigned lead with follow-up`,
         });
       }
 

@@ -148,8 +148,8 @@ export default function LeadDetailScreen() {
         await addActivity({
           lead_id: lead.id,
           user_id: appUser.id,
-          type: 'reassignment',
-          note: `Reassigned to ${getUserById(editOwnerId)?.name ?? 'unassigned'}`,
+          type: 'note',
+          note: `[REASSIGNMENT] Reassigned to ${getUserById(editOwnerId)?.name ?? 'unassigned'}`,
         });
       }
 
