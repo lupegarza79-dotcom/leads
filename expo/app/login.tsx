@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,30 +9,31 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
-import { Shield, Mail, ArrowRight, KeyRound, RotateCcw } from 'lucide-react-native';
+import { Shield, Mail, ArrowRight, Lock, Eye, EyeOff, CheckCircle } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useRouter } from 'expo-router';
 
-type Step = 'email' | 'otp';
+type Screen = 'login' | 'forgot';
 
 export default function LoginScreen() {
   const {
-    sendOtp,
-    sendOtpPending,
-    verifyOtp,
-    verifyOtpPending,
+    signIn,
+    signInPending,
+    resetPassword,
+    resetPasswordPending,
     isAuthenticated,
     isLoading,
   } = useAuth();
   const [email, setEmail] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [step, setStep] = useState<Step>('email');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [screen, setScreen] = useState<Screen>('login');
   const [error, setError] = useState<string | null>(null);
-  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resetSent, setResetSent] = useState(false);
   const router = useRouter();
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
@@ -41,112 +42,166 @@ export default function LoginScreen() {
     }
   }, [isLoading, isAuthenticated, router]);
 
-  useEffect(() => {
-    return () => {
-      if (cooldownRef.current) clearInterval(cooldownRef.current);
-    };
-  }, []);
-
-  const startCooldown = useCallback(() => {
-    setResendCooldown(60);
-    if (cooldownRef.current) clearInterval(cooldownRef.current);
-    cooldownRef.current = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          if (cooldownRef.current) clearInterval(cooldownRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
-
-  const handleSendCode = useCallback(async () => {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) {
+  const handleSignIn = useCallback(async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+    if (!trimmedEmail) {
       Alert.alert('Required', 'Please enter your email address.');
       return;
     }
-    setError(null);
-
-    try {
-      await sendOtp(trimmed);
-      setStep('otp');
-      setOtpCode('');
-      startCooldown();
-      console.log('[Login] OTP sent to:', trimmed);
-    } catch (e: any) {
-      console.log('[Login] Send OTP error:', e);
-      const msg = e?.message ?? 'Failed to send code. Please try again.';
-      setError(msg);
-    }
-  }, [email, sendOtp, startCooldown]);
-
-  const handleVerifyCode = useCallback(async () => {
-    const trimmed = email.trim().toLowerCase();
-    const code = otpCode.trim();
-    if (!code || code.length < 6) {
-      Alert.alert('Required', 'Please enter the verification code from your email.');
+    if (!trimmedPassword) {
+      Alert.alert('Required', 'Please enter your password.');
       return;
     }
     setError(null);
 
-    const verifyTimeout = setTimeout(() => {
-      console.log('[Login] Verify timed out after 15s, checking session...');
-      setError('Verification is taking too long. Please try again.');
-    }, 15000);
-
     try {
-      await verifyOtp(trimmed, code);
-      clearTimeout(verifyTimeout);
-      console.log('[Login] OTP verified successfully, navigating to /');
+      await signIn(trimmedEmail, trimmedPassword);
+      console.log('[Login] Sign in successful, navigating to /');
       router.replace('/');
     } catch (e: any) {
-      clearTimeout(verifyTimeout);
-      console.log('[Login] Verify OTP error:', e);
-      const msg = e?.message ?? 'Verification failed. Please check your code and try again.';
-      setError(msg);
+      console.log('[Login] Sign in error:', e);
+      const msg = e?.message ?? 'Sign in failed. Check your credentials and try again.';
+      if (msg.includes('Invalid login credentials')) {
+        setError('Invalid email or password. Please try again.');
+      } else {
+        setError(msg);
+      }
     }
-  }, [email, otpCode, verifyOtp, router]);
+  }, [email, password, signIn, router]);
 
-  const handleResend = useCallback(async () => {
-    if (resendCooldown > 0) return;
+  const handleForgotPassword = useCallback(async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail) {
+      Alert.alert('Required', 'Please enter your email address first.');
+      return;
+    }
     setError(null);
-    const trimmed = email.trim().toLowerCase();
+    setResetSent(false);
 
     try {
-      await sendOtp(trimmed);
-      startCooldown();
-      console.log('[Login] OTP resent to:', trimmed);
+      await resetPassword(trimmedEmail);
+      setResetSent(true);
+      console.log('[Login] Password reset sent to:', trimmedEmail);
     } catch (e: any) {
-      console.log('[Login] Resend OTP error:', e);
-      setError(e?.message ?? 'Failed to resend code.');
+      console.log('[Login] Reset password error:', e);
+      setError(e?.message ?? 'Failed to send reset email. Try again.');
     }
-  }, [email, sendOtp, resendCooldown, startCooldown]);
+  }, [email, resetPassword]);
 
-  const handleBackToEmail = useCallback(() => {
-    setStep('email');
-    setOtpCode('');
+  const goToForgot = useCallback(() => {
+    setScreen('forgot');
     setError(null);
+    setResetSent(false);
   }, []);
 
-  if (step === 'otp') {
+  const goToLogin = useCallback(() => {
+    setScreen('login');
+    setError(null);
+    setResetSent(false);
+  }, []);
+
+  if (screen === 'forgot') {
     return (
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.card}>
+            <View style={styles.logoWrap}>
+              <View style={styles.logoBg}>
+                <Mail size={32} color={Colors.primary} />
+              </View>
+            </View>
+            <Text style={styles.brand}>MG LEADS ENGINE</Text>
+            <Text style={styles.title}>Reset Password</Text>
+            <Text style={styles.subtitle}>
+              Enter your email and we'll send a password reset link.
+            </Text>
+
+            {error ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            {resetSent ? (
+              <View style={styles.successBox}>
+                <CheckCircle size={16} color={Colors.success} />
+                <Text style={styles.successText}>
+                  Reset link sent to {email.trim().toLowerCase()}. Check your inbox.
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.inputGroup}>
+              <View style={styles.inputWrap}>
+                <Mail size={18} color={Colors.textTertiary} />
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor={Colors.textTertiary}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!resetPasswordPending}
+                  testID="forgot-email"
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.submitBtn, resetPasswordPending && styles.submitBtnDisabled]}
+              onPress={handleForgotPassword}
+              disabled={resetPasswordPending}
+              activeOpacity={0.8}
+              testID="forgot-submit"
+            >
+              {resetPasswordPending ? (
+                <ActivityIndicator color={Colors.white} size="small" />
+              ) : (
+                <Text style={styles.submitText}>Send Reset Link</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={goToLogin}
+              style={styles.backLink}
+              testID="forgot-back"
+            >
+              <Text style={styles.backLinkText}>Back to Sign In</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.card}>
           <View style={styles.logoWrap}>
             <View style={styles.logoBg}>
-              <KeyRound size={32} color={Colors.primary} />
+              <Shield size={32} color={Colors.primary} />
             </View>
           </View>
           <Text style={styles.brand}>MG LEADS ENGINE</Text>
-          <Text style={styles.title}>Enter Code</Text>
+          <Text style={styles.title}>Sign In</Text>
           <Text style={styles.subtitle}>
-            We sent a verification code to{'\n'}
-            <Text style={styles.emailHighlight}>{email.trim().toLowerCase()}</Text>
+            Internal access only. Enter your credentials to continue.
           </Text>
 
           {error ? (
@@ -157,131 +212,83 @@ export default function LoginScreen() {
 
           <View style={styles.inputGroup}>
             <View style={styles.inputWrap}>
-              <KeyRound size={18} color={Colors.textTertiary} />
+              <Mail size={18} color={Colors.textTertiary} />
               <TextInput
-                style={styles.otpInput}
-                value={otpCode}
-                onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, '').slice(0, 8))}
-                placeholder="00000000"
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
                 placeholderTextColor={Colors.textTertiary}
-                keyboardType="number-pad"
-                maxLength={8}
-                autoFocus
-                editable={!verifyOtpPending}
-                testID="login-otp"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!signInPending}
+                testID="login-email"
               />
             </View>
           </View>
 
+          <View style={styles.inputGroup}>
+            <View style={styles.inputWrap}>
+              <Lock size={18} color={Colors.textTertiary} />
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor={Colors.textTertiary}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!signInPending}
+                onSubmitEditing={handleSignIn}
+                returnKeyType="go"
+                testID="login-password"
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword((p) => !p)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                testID="login-toggle-password"
+              >
+                {showPassword ? (
+                  <EyeOff size={18} color={Colors.textTertiary} />
+                ) : (
+                  <Eye size={18} color={Colors.textTertiary} />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <TouchableOpacity
-            style={[styles.submitBtn, verifyOtpPending && styles.submitBtnDisabled]}
-            onPress={handleVerifyCode}
-            disabled={verifyOtpPending}
+            style={[styles.submitBtn, signInPending && styles.submitBtnDisabled]}
+            onPress={handleSignIn}
+            disabled={signInPending}
             activeOpacity={0.8}
-            testID="login-verify"
+            testID="login-submit"
           >
-            {verifyOtpPending ? (
+            {signInPending ? (
               <ActivityIndicator color={Colors.white} size="small" />
             ) : (
               <View style={styles.submitInner}>
-                <Text style={styles.submitText}>Verify Code</Text>
+                <Text style={styles.submitText}>Sign In</Text>
                 <ArrowRight size={18} color={Colors.white} />
               </View>
             )}
           </TouchableOpacity>
 
-          <View style={styles.secondaryRow}>
-            <TouchableOpacity
-              onPress={handleResend}
-              disabled={resendCooldown > 0 || sendOtpPending}
-              style={styles.secondaryBtn}
-            >
-              <RotateCcw size={14} color={resendCooldown > 0 ? Colors.textTertiary : Colors.primary} />
-              <Text
-                style={[
-                  styles.secondaryBtnText,
-                  resendCooldown > 0 && styles.secondaryBtnTextDisabled,
-                ]}
-              >
-                {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={handleBackToEmail} style={styles.secondaryBtn}>
-              <Text style={styles.secondaryBtnText}>Change Email</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={goToForgot}
+            style={styles.forgotLink}
+            testID="login-forgot"
+          >
+            <Text style={styles.forgotLinkText}>Forgot Password?</Text>
+          </TouchableOpacity>
 
           <Text style={styles.accessNote}>
-            Only users with a matching mg_users record can access this app.
+            Only authorized mg_users can access this app.
           </Text>
         </View>
-      </KeyboardAvoidingView>
-    );
-  }
-
-  return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.card}>
-        <View style={styles.logoWrap}>
-          <View style={styles.logoBg}>
-            <Shield size={32} color={Colors.primary} />
-          </View>
-        </View>
-        <Text style={styles.brand}>MG LEADS ENGINE</Text>
-        <Text style={styles.title}>Sign In</Text>
-        <Text style={styles.subtitle}>
-          Internal access only. Enter your authorized email to receive a verification code.
-        </Text>
-
-        {error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.inputGroup}>
-          <View style={styles.inputWrap}>
-            <Mail size={18} color={Colors.textTertiary} />
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              placeholderTextColor={Colors.textTertiary}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!sendOtpPending}
-              testID="login-email"
-            />
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.submitBtn, sendOtpPending && styles.submitBtnDisabled]}
-          onPress={handleSendCode}
-          disabled={sendOtpPending}
-          activeOpacity={0.8}
-          testID="login-submit"
-        >
-          {sendOtpPending ? (
-            <ActivityIndicator color={Colors.white} size="small" />
-          ) : (
-            <View style={styles.submitInner}>
-              <Text style={styles.submitText}>Send Code</Text>
-              <ArrowRight size={18} color={Colors.white} />
-            </View>
-          )}
-        </TouchableOpacity>
-
-        <Text style={styles.accessNote}>
-          Only Supabase-invited users with a matching mg_users record can access this app.
-        </Text>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -290,6 +297,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -338,10 +348,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 24,
   },
-  emailHighlight: {
-    color: Colors.primary,
-    fontWeight: '600' as const,
-  },
   errorBox: {
     backgroundColor: '#FEE2E2',
     borderRadius: 10,
@@ -356,8 +362,25 @@ const styles = StyleSheet.create({
     textAlign: 'center' as const,
     lineHeight: 18,
   },
-  inputGroup: {
+  successBox: {
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    borderRadius: 10,
+    padding: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.25)',
+    flexDirection: 'row' as const,
+    alignItems: 'center',
+    gap: 8,
+  },
+  successText: {
+    color: Colors.success,
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  inputGroup: {
+    marginBottom: 12,
   },
   inputWrap: {
     flexDirection: 'row' as const,
@@ -375,21 +398,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     paddingVertical: 14,
   },
-  otpInput: {
-    flex: 1,
-    color: Colors.textPrimary,
-    fontSize: 24,
-    fontWeight: '700' as const,
-    paddingVertical: 14,
-    letterSpacing: 4,
-    textAlign: 'center' as const,
-  },
   submitBtn: {
     backgroundColor: Colors.primary,
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 4,
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -409,31 +424,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700' as const,
   },
-  secondaryRow: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between',
+  forgotLink: {
     alignItems: 'center',
-    marginTop: 16,
+    paddingVertical: 14,
   },
-  secondaryBtn: {
-    flexDirection: 'row' as const,
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
-  },
-  secondaryBtnText: {
+  forgotLinkText: {
     color: Colors.primary,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600' as const,
   },
-  secondaryBtnTextDisabled: {
-    color: Colors.textTertiary,
+  backLink: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  backLinkText: {
+    color: Colors.primary,
+    fontSize: 14,
+    fontWeight: '600' as const,
   },
   accessNote: {
     color: Colors.textTertiary,
     fontSize: 11,
     textAlign: 'center' as const,
-    marginTop: 16,
+    marginTop: 4,
     lineHeight: 16,
   },
 });

@@ -9,7 +9,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<{ email?: string } | null>(null);
   const [appUser, setAppUser] = useState<MgUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const verifyInFlightRef = useRef(false);
+  const signInInFlightRef = useRef(false);
 
   const resolveAppUser = useCallback(async (email: string) => {
     console.log('[Auth] Resolving mg_users for:', email);
@@ -92,8 +92,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[Auth] State changed:', _event, s?.user?.email ?? 'none');
       if (!mounted) return;
 
-      if (verifyInFlightRef.current) {
-        console.log('[Auth] Skipping listener — verifyOtp is handling state');
+      if (signInInFlightRef.current) {
+        console.log('[Auth] Skipping listener — signIn is handling state');
         return;
       }
 
@@ -115,37 +115,21 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
   }, [resolveAppUser]);
 
-  const sendOtpMutation = useMutation({
-    mutationFn: async (email: string) => {
-      console.log('[Auth] Sending OTP to:', email);
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false,
-        },
-      });
-      if (error) throw error;
-      console.log('[Auth] OTP sent successfully to:', email);
-      return email;
-    },
-  });
-
-  const verifyOtpMutation = useMutation({
-    mutationFn: async ({ email, token }: { email: string; token: string }) => {
-      console.log('[Auth] Verifying OTP for:', email);
-      verifyInFlightRef.current = true;
+  const signInMutation = useMutation({
+    mutationFn: async ({ email, password }: { email: string; password: string }) => {
+      console.log('[Auth] Signing in with password for:', email);
+      signInInFlightRef.current = true;
 
       try {
-        const { data, error } = await supabase.auth.verifyOtp({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
-          token,
-          type: 'email',
+          password,
         });
         if (error) throw error;
 
         const userEmail = data.user?.email;
         if (!userEmail) {
-          throw new Error('Verification succeeded but no user email returned.');
+          throw new Error('Sign in succeeded but no user email returned.');
         }
 
         const resolved = await resolveAppUser(userEmail);
@@ -158,7 +142,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           throw new Error('Unauthorized. Your email is not registered in this system.');
         }
 
-        console.log('[Auth] OTP verified, setting session + appUser immediately');
+        console.log('[Auth] Password sign-in verified, setting session + appUser');
         setSession(data.session);
         setUser(data.user ?? null);
         setAppUser(resolved);
@@ -166,18 +150,30 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
         return resolved;
       } finally {
-        verifyInFlightRef.current = false;
+        signInInFlightRef.current = false;
       }
     },
   });
 
-  const sendOtp = useCallback((email: string) => {
-    return sendOtpMutation.mutateAsync(email);
-  }, [sendOtpMutation.mutateAsync]);
+  const signIn = useCallback((email: string, password: string) => {
+    return signInMutation.mutateAsync({ email, password });
+  }, [signInMutation.mutateAsync]);
 
-  const verifyOtp = useCallback((email: string, token: string) => {
-    return verifyOtpMutation.mutateAsync({ email, token });
-  }, [verifyOtpMutation.mutateAsync]);
+  const resetPasswordMutation = useMutation({
+    mutationFn: async (email: string) => {
+      console.log('[Auth] Sending password reset to:', email);
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: undefined,
+      });
+      if (error) throw error;
+      console.log('[Auth] Password reset email sent to:', email);
+      return email;
+    },
+  });
+
+  const resetPassword = useCallback((email: string) => {
+    return resetPasswordMutation.mutateAsync(email);
+  }, [resetPasswordMutation.mutateAsync]);
 
   const signOutMutation = useMutation({
     mutationFn: async () => {
@@ -200,12 +196,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     appUser,
     isLoading,
     isAuthenticated: !!session && !!appUser,
-    sendOtp,
-    sendOtpPending: sendOtpMutation.isPending,
-    sendOtpError: sendOtpMutation.error,
-    verifyOtp,
-    verifyOtpPending: verifyOtpMutation.isPending,
-    verifyOtpError: verifyOtpMutation.error,
+    signIn,
+    signInPending: signInMutation.isPending,
+    signInError: signInMutation.error,
+    resetPassword,
+    resetPasswordPending: resetPasswordMutation.isPending,
+    resetPasswordError: resetPasswordMutation.error,
     signOut,
     signOutPending: signOutMutation.isPending,
   };
