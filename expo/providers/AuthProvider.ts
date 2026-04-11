@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Platform } from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { supabase } from '@/lib/supabase';
@@ -9,6 +10,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<{ email?: string } | null>(null);
   const [appUser, setAppUser] = useState<MgUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const signInInFlightRef = useRef(false);
 
   const resolveAppUser = useCallback(async (email: string) => {
@@ -92,6 +94,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[Auth] State changed:', _event, s?.user?.email ?? 'none');
       if (!mounted) return;
 
+      if (_event === 'PASSWORD_RECOVERY') {
+        console.log('[Auth] PASSWORD_RECOVERY event detected');
+        setSession(s);
+        setUser(s?.user ?? null);
+        setIsRecoveryMode(true);
+        setIsLoading(false);
+        return;
+      }
+
       if (signInInFlightRef.current) {
         console.log('[Auth] Skipping listener — signIn is handling state');
         return;
@@ -162,8 +173,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const resetPasswordMutation = useMutation({
     mutationFn: async (email: string) => {
       console.log('[Auth] Sending password reset to:', email);
+      const redirectTo = Platform.OS === 'web' && typeof window !== 'undefined'
+        ? window.location.origin
+        : undefined;
+      console.log('[Auth] Reset redirectTo:', redirectTo);
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: undefined,
+        redirectTo,
       });
       if (error) throw error;
       console.log('[Auth] Password reset email sent to:', email);
@@ -171,9 +186,47 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     },
   });
 
+  const updatePasswordMutation = useMutation({
+    mutationFn: async (newPassword: string) => {
+      console.log('[Auth] Updating password via updateUser');
+      const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      console.log('[Auth] Password updated successfully for:', data.user?.email);
+
+      setIsRecoveryMode(false);
+
+      const userEmail = data.user?.email;
+      if (userEmail) {
+        const resolved = await resolveAppUser(userEmail);
+        setAppUser(resolved);
+        if (!resolved) {
+          console.log('[Auth] No mg_user match after password update, signing out');
+          await supabase.auth.signOut().catch(() => {});
+          setSession(null);
+          setUser(null);
+          setAppUser(null);
+          throw new Error('Password updated, but your email is not authorized in this system.');
+        }
+        setSession(session);
+        setUser(data.user ?? null);
+      }
+
+      return data.user;
+    },
+  });
+
   const resetPassword = useCallback((email: string) => {
     return resetPasswordMutation.mutateAsync(email);
   }, [resetPasswordMutation.mutateAsync]);
+
+  const updatePassword = useCallback((newPassword: string) => {
+    return updatePasswordMutation.mutateAsync(newPassword);
+  }, [updatePasswordMutation.mutateAsync]);
+
+  const clearRecoveryMode = useCallback(() => {
+    console.log('[Auth] Clearing recovery mode');
+    setIsRecoveryMode(false);
+  }, []);
 
   const signOutMutation = useMutation({
     mutationFn: async () => {
@@ -196,12 +249,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     appUser,
     isLoading,
     isAuthenticated: !!session && !!appUser,
+    isRecoveryMode,
     signIn,
     signInPending: signInMutation.isPending,
     signInError: signInMutation.error,
     resetPassword,
     resetPasswordPending: resetPasswordMutation.isPending,
     resetPasswordError: resetPasswordMutation.error,
+    updatePassword,
+    updatePasswordPending: updatePasswordMutation.isPending,
+    updatePasswordError: updatePasswordMutation.error,
+    clearRecoveryMode,
     signOut,
     signOutPending: signOutMutation.isPending,
   };

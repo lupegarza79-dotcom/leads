@@ -13,7 +13,7 @@ void SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, signOut } = useAuth();
+  const { isAuthenticated, isLoading, signOut, isRecoveryMode } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
@@ -34,16 +34,23 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (isLoading && !loadingTimedOut) return;
 
     const inLoginScreen = segments[0] === 'login';
+    const inResetScreen = segments[0] === 'reset-password';
     const effectiveAuth = loadingTimedOut ? false : isAuthenticated;
 
-    if (!effectiveAuth && !inLoginScreen) {
+    if (isRecoveryMode && !inResetScreen) {
+      console.log('[AuthGate] Recovery mode detected, redirecting to reset-password');
+      router.replace('/reset-password');
+      return;
+    }
+
+    if (!effectiveAuth && !inLoginScreen && !inResetScreen && !isRecoveryMode) {
       console.log('[AuthGate] Not authenticated, redirecting to login');
       router.replace('/login');
-    } else if (isAuthenticated && inLoginScreen) {
+    } else if (isAuthenticated && !isRecoveryMode && (inLoginScreen || inResetScreen)) {
       console.log('[AuthGate] Authenticated, redirecting to home');
       router.replace('/');
     }
-  }, [isAuthenticated, isLoading, loadingTimedOut, segments, router]);
+  }, [isAuthenticated, isLoading, loadingTimedOut, segments, router, isRecoveryMode]);
 
   if (isLoading && !loadingTimedOut) {
     return (
@@ -91,6 +98,13 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
           name="login"
+          options={{
+            headerShown: false,
+            gestureEnabled: false,
+          }}
+        />
+        <Stack.Screen
+          name="reset-password"
           options={{
             headerShown: false,
             gestureEnabled: false,
