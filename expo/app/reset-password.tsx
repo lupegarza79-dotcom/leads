@@ -22,7 +22,6 @@ export default function ResetPasswordScreen() {
   const {
     updatePassword,
     updatePasswordPending,
-    signOut,
     clearRecoveryMode,
     isRecoveryMode,
   } = useAuth();
@@ -74,19 +73,12 @@ export default function ResetPasswordScreen() {
     }
   }, [password, confirmPassword, updatePassword]);
 
-  const handleGoToLogin = useCallback(async () => {
-    try {
-      await signOut();
-    } catch {
-      // ignore
-    }
+  const handleGoToLogin = useCallback(() => {
     clearRecoveryMode();
     router.replace('/login');
-  }, [signOut, clearRecoveryMode, router]);
+  }, [clearRecoveryMode, router]);
 
-  const handleContinueToApp = useCallback(() => {
-    router.replace('/');
-  }, [router]);
+
 
   if (screenState === 'success') {
     return (
@@ -109,19 +101,11 @@ export default function ResetPasswordScreen() {
 
             <TouchableOpacity
               style={styles.submitBtn}
-              onPress={handleContinueToApp}
-              activeOpacity={0.8}
-              testID="reset-continue"
-            >
-              <Text style={styles.submitText}>Continue to App</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
               onPress={handleGoToLogin}
-              style={styles.backLink}
+              activeOpacity={0.8}
               testID="reset-go-login"
             >
-              <Text style={styles.backLinkText}>Go to Sign In</Text>
+              <Text style={styles.submitText}>Go to Sign In</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>

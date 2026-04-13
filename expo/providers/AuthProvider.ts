@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Platform } from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
@@ -11,7 +11,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [appUser, setAppUser] = useState<MgUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  const isRecoveryModeRef = useRef(false);
   const signInInFlightRef = useRef(false);
+
+  const setRecoveryMode = useCallback((value: boolean) => {
+    console.log('[Auth] Setting recovery mode:', value);
+    setIsRecoveryMode(value);
+    isRecoveryModeRef.current = value;
+  }, []);
 
   const resolveAppUser = useCallback(async (email: string) => {
     console.log('[Auth] Resolving mg_users for:', email);
@@ -63,7 +70,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             ]);
             if (!mounted) return;
             setAppUser(resolved);
-            if (!resolved) {
+            if (!resolved && !isRecoveryModeRef.current) {
               console.log('[Auth] No mg_user match on init, signing out');
               await supabase.auth.signOut().catch(() => {});
               setSession(null);
@@ -98,8 +105,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         console.log('[Auth] PASSWORD_RECOVERY event detected');
         setSession(s);
         setUser(s?.user ?? null);
-        setIsRecoveryMode(true);
+        setRecoveryMode(true);
         setIsLoading(false);
+        return;
+      }
+
+      if (isRecoveryModeRef.current) {
+        console.log('[Auth] Skipping auth event during recovery mode:', _event);
         return;
       }
 
@@ -190,26 +202,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     mutationFn: async (newPassword: string) => {
       console.log('[Auth] Updating password via updateUser');
       const { data, error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
+      if (error) {
+        console.log('[Auth] Password update error:', error.message);
+        throw error;
+      }
       console.log('[Auth] Password updated successfully for:', data.user?.email);
 
-      setIsRecoveryMode(false);
-
-      const userEmail = data.user?.email;
-      if (userEmail) {
-        const resolved = await resolveAppUser(userEmail);
-        setAppUser(resolved);
-        if (!resolved) {
-          console.log('[Auth] No mg_user match after password update, signing out');
-          await supabase.auth.signOut().catch(() => {});
-          setSession(null);
-          setUser(null);
-          setAppUser(null);
-          throw new Error('Password updated, but your email is not authorized in this system.');
-        }
-        setSession(session);
-        setUser(data.user ?? null);
-      }
+      await supabase.auth.signOut().catch((e) => {
+        console.log('[Auth] Post-update signOut error (non-fatal):', e);
+      });
+      setSession(null);
+      setUser(null);
+      setAppUser(null);
+      console.log('[Auth] Signed out after password update — user must re-login');
 
       return data.user;
     },
@@ -224,9 +229,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, [updatePasswordMutation.mutateAsync]);
 
   const clearRecoveryMode = useCallback(() => {
-    console.log('[Auth] Clearing recovery mode');
-    setIsRecoveryMode(false);
-  }, []);
+    setRecoveryMode(false);
+  }, [setRecoveryMode]);
 
   const signOutMutation = useMutation({
     mutationFn: async () => {
