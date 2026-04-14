@@ -200,22 +200,40 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const updatePasswordMutation = useMutation({
     mutationFn: async (newPassword: string) => {
-      console.log('[Auth] Updating password via updateUser');
+      console.log('[Auth] updatePasswordMutation: START');
+      console.log('[Auth] updatePasswordMutation: calling supabase.auth.updateUser');
       const { data, error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) {
-        console.log('[Auth] Password update error:', error.message);
+        console.log('[Auth] updatePasswordMutation: updateUser FAILED:', error.message);
         throw error;
       }
-      console.log('[Auth] Password updated successfully for:', data.user?.email);
+      console.log('[Auth] updatePasswordMutation: updateUser SUCCESS for:', data.user?.email);
 
-      await supabase.auth.signOut().catch((e) => {
-        console.log('[Auth] Post-update signOut error (non-fatal):', e);
-      });
       setSession(null);
       setUser(null);
       setAppUser(null);
-      console.log('[Auth] Signed out after password update — user must re-login');
+      console.log('[Auth] updatePasswordMutation: state cleared, returning immediately');
 
+      const signOutWithTimeout = async () => {
+        try {
+          console.log('[Auth] updatePasswordMutation: fire-and-forget signOut START');
+          const result = await Promise.race([
+            supabase.auth.signOut(),
+            new Promise<{ error: null }>((resolve) =>
+              setTimeout(() => {
+                console.log('[Auth] updatePasswordMutation: signOut TIMED OUT after 3s');
+                resolve({ error: null });
+              }, 3000)
+            ),
+          ]);
+          console.log('[Auth] updatePasswordMutation: fire-and-forget signOut DONE', result);
+        } catch (e) {
+          console.log('[Auth] updatePasswordMutation: fire-and-forget signOut ERROR (non-fatal):', e);
+        }
+      };
+      signOutWithTimeout();
+
+      console.log('[Auth] updatePasswordMutation: END — user must re-login');
       return data.user;
     },
   });
