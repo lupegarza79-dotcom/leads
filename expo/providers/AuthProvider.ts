@@ -140,40 +140,78 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const signInMutation = useMutation({
     mutationFn: async ({ email, password }: { email: string; password: string }) => {
-      console.log('[Auth] Signing in with password for:', email);
+      console.log('[Auth][signIn] START for:', email);
       signInInFlightRef.current = true;
 
       try {
+        console.log('[Auth][signIn] signInWithPassword START');
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (error) throw error;
+
+        if (error) {
+          console.log('[Auth][signIn] signInWithPassword FAIL:', error.message);
+          throw error;
+        }
+        console.log('[Auth][signIn] signInWithPassword SUCCESS, user:', data.user?.email);
 
         const userEmail = data.user?.email;
         if (!userEmail) {
           throw new Error('Sign in succeeded but no user email returned.');
         }
 
-        const resolved = await resolveAppUser(userEmail);
+        console.log('[Auth][signIn] resolveAppUser START');
+        const resolved = await Promise.race([
+          resolveAppUser(userEmail),
+          new Promise<null>((resolve) => {
+            setTimeout(() => {
+              console.log('[Auth][signIn] resolveAppUser TIMED OUT after 8s');
+              resolve(null);
+            }, 8000);
+          }),
+        ]);
+        console.log('[Auth][signIn] resolveAppUser RESULT:', resolved ? `${resolved.name} / ${resolved.role}` : 'null');
+
         if (!resolved) {
-          console.log('[Auth] No mg_user match, signing out unauthorized user');
-          await supabase.auth.signOut();
+          console.log('[Auth][signIn] No mg_user match — unauthorized, signing out');
           setSession(null);
           setUser(null);
           setAppUser(null);
+
+          try {
+            console.log('[Auth][signIn] signOut (unauthorized) START');
+            await Promise.race([
+              supabase.auth.signOut(),
+              new Promise<{ error: null }>((resolve) =>
+                setTimeout(() => {
+                  console.log('[Auth][signIn] signOut (unauthorized) TIMED OUT after 3s');
+                  resolve({ error: null });
+                }, 3000)
+              ),
+            ]);
+            console.log('[Auth][signIn] signOut (unauthorized) DONE');
+          } catch (signOutErr) {
+            console.log('[Auth][signIn] signOut (unauthorized) ERROR (non-fatal):', signOutErr);
+          }
+
           throw new Error('Unauthorized. Your email is not registered in this system.');
         }
 
-        console.log('[Auth] Password sign-in verified, setting session + appUser');
+        console.log('[Auth][signIn] Setting session + appUser');
         setSession(data.session);
         setUser(data.user ?? null);
         setAppUser(resolved);
         setIsLoading(false);
 
+        console.log('[Auth][signIn] END — success');
         return resolved;
+      } catch (err) {
+        console.log('[Auth][signIn] ERROR:', err);
+        throw err;
       } finally {
         signInInFlightRef.current = false;
+        console.log('[Auth][signIn] FINALLY — signInInFlightRef reset');
       }
     },
   });
