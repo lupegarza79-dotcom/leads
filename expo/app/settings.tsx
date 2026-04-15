@@ -253,6 +253,9 @@ export default function SettingsScreen() {
           />
           {expanded === 'sla' && (
             <View style={styles.sectionBody}>
+              <View style={styles.readOnlyNotice}>
+                <Text style={styles.readOnlyNoticeText}>These are default reference values stored locally. The live engine uses built-in defaults until server-side configuration is added.</Text>
+              </View>
               <NumberField
                 label="New Lead Alert (min)"
                 value={editSLA.newLeadAlertMinutes}
@@ -300,6 +303,9 @@ export default function SettingsScreen() {
           />
           {expanded === 'escalation' && (
             <View style={styles.sectionBody}>
+              <View style={styles.readOnlyNotice}>
+                <Text style={styles.readOnlyNoticeText}>Reference values only. The live escalation engine uses built-in defaults.</Text>
+              </View>
               <NumberField
                 label="Due Soon (min before due)"
                 value={editEscalation.dueSoonMinutes}
@@ -337,6 +343,9 @@ export default function SettingsScreen() {
           />
           {expanded === 'followup' && (
             <View style={styles.sectionBody}>
+              <View style={styles.readOnlyNotice}>
+                <Text style={styles.readOnlyNoticeText}>Schedule days are reference values. Auto follow-up for new leads is active and configurable below.</Text>
+              </View>
               <View style={styles.fieldRow}>
                 <Text style={styles.fieldLabel}>Schedule Days (after quote)</Text>
                 <TextInput
@@ -864,5 +873,19 @@ const styles = StyleSheet.create({
   versionRow: { alignItems: 'center', paddingVertical: 16 },
   versionText: { color: Colors.textTertiary, fontSize: 13, fontWeight: '600' as const },
   versionSub: { color: Colors.textTertiary, fontSize: 11, marginTop: 2 },
+  readOnlyNotice: {
+    backgroundColor: Colors.warningMuted,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: Colors.warning + '22',
+  },
+  readOnlyNoticeText: {
+    color: Colors.warning,
+    fontSize: 11,
+    lineHeight: 16,
+    fontStyle: 'italic' as const,
+  },
   bottomPad: { height: 40 },
 });

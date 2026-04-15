@@ -64,6 +64,8 @@ export default function LoginScreen() {
       const msg = e?.message ?? 'Sign in failed. Check your credentials and try again.';
       if (msg.includes('Invalid login credentials')) {
         setError('Invalid email or password. Please try again.');
+      } else if (msg.includes('timed out')) {
+        setError('Connection timed out. Please check your internet and try again.');
       } else {
         setError(msg);
       }
@@ -76,6 +78,11 @@ export default function LoginScreen() {
       Alert.alert('Required', 'Please enter your email address first.');
       return;
     }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     setError(null);
     setResetSent(false);
 
@@ -85,7 +92,12 @@ export default function LoginScreen() {
       console.log('[Login] Password reset sent to:', trimmedEmail);
     } catch (e: any) {
       console.log('[Login] Reset password error:', e);
-      setError(e?.message ?? 'Failed to send reset email. Try again.');
+      const msg = e?.message ?? 'Failed to send reset email. Try again.';
+      if (msg.includes('timed out')) {
+        setError('Connection timed out. Please check your internet and try again.');
+      } else {
+        setError(msg);
+      }
     }
   }, [email, resetPassword]);
 

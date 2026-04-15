@@ -3,7 +3,10 @@ import { Platform } from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import { supabase } from '@/lib/supabase';
+import { withTimeout } from '@/utils/with-timeout';
 import type { MgUser } from '@/types/leads';
+
+const AUTH_TIMEOUT_MS = 15000;
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [session, setSession] = useState<any>(null);
@@ -145,10 +148,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       try {
         console.log('[Auth][signIn] signInWithPassword START');
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { data, error } = await withTimeout(
+          supabase.auth.signInWithPassword({ email, password }),
+          AUTH_TIMEOUT_MS,
+        );
 
         if (error) {
           console.log('[Auth][signIn] signInWithPassword FAIL:', error.message);
@@ -227,9 +230,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         ? window.location.origin
         : undefined;
       console.log('[Auth] Reset redirectTo:', redirectTo);
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo,
-      });
+      const { error } = await withTimeout(
+        supabase.auth.resetPasswordForEmail(email, { redirectTo }),
+        AUTH_TIMEOUT_MS,
+      );
       if (error) throw error;
       console.log('[Auth] Password reset email sent to:', email);
       return email;
@@ -240,7 +244,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     mutationFn: async (newPassword: string) => {
       console.log('[Auth] updatePasswordMutation: START');
       console.log('[Auth] updatePasswordMutation: calling supabase.auth.updateUser');
-      const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+      const { data, error } = await withTimeout(
+        supabase.auth.updateUser({ password: newPassword }),
+        AUTH_TIMEOUT_MS,
+      );
       if (error) {
         console.log('[Auth] updatePasswordMutation: updateUser FAILED:', error.message);
         throw error;
@@ -291,11 +298,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const signOutMutation = useMutation({
     mutationFn: async () => {
       console.log('[Auth] Signing out');
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
       setSession(null);
       setUser(null);
       setAppUser(null);
+      setRecoveryMode(false);
+      try {
+        await withTimeout(supabase.auth.signOut(), 5000);
+      } catch (e) {
+        console.log('[Auth] signOut network error (non-fatal, state already cleared):', e);
+      }
     },
   });
 

@@ -94,16 +94,46 @@ export default function AddLeadScreen() {
       Alert.alert('Required', 'Please enter a phone number.');
       return;
     }
+    const phoneDigits = phone.trim().replace(/\D/g, '');
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      Alert.alert('Invalid Phone', 'Phone number must have 7-15 digits.');
+      return;
+    }
     if (!fullName.trim()) {
       Alert.alert('Required', 'Please enter a full name.');
+      return;
+    }
+    if (fullName.trim().length < 2) {
+      Alert.alert('Invalid Name', 'Name must be at least 2 characters.');
       return;
     }
     if (!amountDue.trim()) {
       Alert.alert('Required', 'Please enter the amount due.');
       return;
     }
+    const parsedAmount = parseFloat(amountDue);
+    if (isNaN(parsedAmount) || parsedAmount < 0) {
+      Alert.alert('Invalid Amount', 'Amount due must be a valid non-negative number.');
+      return;
+    }
     if (!nextFollowUp) {
       Alert.alert('Required', 'Please select a follow-up date.');
+      return;
+    }
+    if (downPayment && (isNaN(parseFloat(downPayment)) || parseFloat(downPayment) < 0)) {
+      Alert.alert('Invalid', 'Down payment must be a valid non-negative number.');
+      return;
+    }
+    if (monthlyPayment && (isNaN(parseFloat(monthlyPayment)) || parseFloat(monthlyPayment) < 0)) {
+      Alert.alert('Invalid', 'Monthly payment must be a valid non-negative number.');
+      return;
+    }
+    if (quotePrice && (isNaN(parseFloat(quotePrice)) || parseFloat(quotePrice) < 0)) {
+      Alert.alert('Invalid', 'Quote price must be a valid non-negative number.');
+      return;
+    }
+    if (premiumAmount && (isNaN(parseFloat(premiumAmount)) || parseFloat(premiumAmount) < 0)) {
+      Alert.alert('Invalid', 'Premium amount must be a valid non-negative number.');
       return;
     }
     if (isSubmitting) return;

@@ -214,6 +214,37 @@ export default function LeadDetailScreen() {
 
   const handleSaveEdit = useCallback(async () => {
     if (!lead || !appUser?.id || submittingRef.current) return;
+
+    if (editName.trim().length < 2) {
+      showToast('error', 'Name must be at least 2 characters.');
+      return;
+    }
+    const phoneDigits = editPhone.trim().replace(/\D/g, '');
+    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      showToast('error', 'Phone must have 7-15 digits.');
+      return;
+    }
+    if (editAmount && (isNaN(parseFloat(editAmount)) || parseFloat(editAmount) < 0)) {
+      showToast('error', 'Amount due must be a valid non-negative number.');
+      return;
+    }
+    if (editQuotePrice && (isNaN(parseFloat(editQuotePrice)) || parseFloat(editQuotePrice) < 0)) {
+      showToast('error', 'Quote price must be non-negative.');
+      return;
+    }
+    if (editPremiumAmount && (isNaN(parseFloat(editPremiumAmount)) || parseFloat(editPremiumAmount) < 0)) {
+      showToast('error', 'Premium must be non-negative.');
+      return;
+    }
+    if (editDownPayment && (isNaN(parseFloat(editDownPayment)) || parseFloat(editDownPayment) < 0)) {
+      showToast('error', 'Down payment must be non-negative.');
+      return;
+    }
+    if (editMonthlyPayment && (isNaN(parseFloat(editMonthlyPayment)) || parseFloat(editMonthlyPayment) < 0)) {
+      showToast('error', 'Monthly payment must be non-negative.');
+      return;
+    }
+
     submittingRef.current = true;
     setIsSubmitting(true);
 

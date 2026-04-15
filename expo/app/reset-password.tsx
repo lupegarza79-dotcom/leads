@@ -61,8 +61,10 @@ export default function ResetPasswordScreen() {
     } catch (e: any) {
       console.log('[ResetPassword] Update error:', e);
       const msg = e?.message ?? 'Failed to update password. Please try again.';
-      if (msg.includes('not authorized')) {
-        setError(msg);
+      if (msg.includes('timed out')) {
+        setError('Connection timed out. Please check your internet and try again.');
+      } else if (msg.includes('not authorized')) {
+        setError('Session expired. Please request a new reset link from Sign In.');
       } else if (msg.includes('same_password') || msg.includes('should be different')) {
         setError('New password must be different from your current password.');
       } else if (msg.includes('weak_password') || msg.includes('too short')) {
