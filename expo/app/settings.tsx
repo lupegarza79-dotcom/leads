@@ -34,7 +34,7 @@ import { Colors } from '@/constants/colors';
 import { OFFICES, NOTIFICATION_CHANNELS } from '@/constants/config';
 import { useAuth } from '@/providers/AuthProvider';
 import { useLeads } from '@/providers/LeadsProvider';
-import { useSettings } from '@/providers/SettingsProvider';
+import { useSettings, DEFAULT_SETTINGS } from '@/providers/SettingsProvider';
 import { ActionToast, type ToastType } from '@/components/ActionToast';
 
 type ExpandedSection = string | null;
@@ -188,9 +188,11 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: async () => {
           await resetSettings();
-          setEditSLA({ ...settings.sla });
-          setEditEscalation({ ...settings.escalation });
-          setEditFollowUpDays(settings.followUpScheduleDays.join(', '));
+          setEditSLA({ ...DEFAULT_SETTINGS.sla });
+          setEditEscalation({ ...DEFAULT_SETTINGS.escalation });
+          setEditFollowUpDays(DEFAULT_SETTINGS.followUpScheduleDays.join(', '));
+          setEditAutoFU(DEFAULT_SETTINGS.autoFollowUpEnabled);
+          setEditAutoFUDays(String(DEFAULT_SETTINGS.autoFollowUpDefaultDays));
           showToast('success', 'Settings reset to defaults');
         },
       },
