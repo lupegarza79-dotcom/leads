@@ -6,6 +6,7 @@ import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from "rea
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { LeadsProvider } from "@/providers/LeadsProvider";
+import { SettingsProvider } from "@/providers/SettingsProvider";
 import { Colors } from "@/constants/colors";
 
 void SplashScreen.preventAutoHideAsync();
@@ -78,7 +79,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (isAuthenticated) {
-    return <LeadsProvider>{children}</LeadsProvider>;
+    return (
+      <SettingsProvider>
+        <LeadsProvider>{children}</LeadsProvider>
+      </SettingsProvider>
+    );
   }
 
   return <>{children}</>;

@@ -8,6 +8,27 @@ import type { PipelineStatus } from '@/constants/config';
 import { FOLLOW_UP_SCHEDULE_DAYS } from '@/constants/config';
 import { addBusinessDays } from '@/utils/business-hours';
 import { getLeadSLAStatus } from '@/utils/sla-engine';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+async function getAutoFollowUpDate(): Promise<string | null> {
+  try {
+    const stored = await AsyncStorage.getItem('mg_app_settings');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed.autoFollowUpEnabled === false) return null;
+      const days = parsed.autoFollowUpDefaultDays ?? 1;
+      const date = addBusinessDays(new Date(), days);
+      date.setHours(10, 0, 0, 0);
+      console.log('[LeadsEngine] Auto follow-up date:', date.toISOString());
+      return date.toISOString();
+    }
+  } catch (e) {
+    console.log('[LeadsEngine] Error reading auto follow-up settings:', e);
+  }
+  const date = addBusinessDays(new Date(), 1);
+  date.setHours(10, 0, 0, 0);
+  return date.toISOString();
+}
 
 async function fetchLeads(): Promise<Lead[]> {
   console.log('[Supabase] Fetching mg_leads...');
@@ -191,7 +212,7 @@ export const [LeadsProvider, useLeads] = createContextHook(() => {
         status: 'New' as const,
         notes: input.notes ?? '',
         last_touch_at: now,
-        next_followup_at: input.next_followup_at ?? null,
+        next_followup_at: input.next_followup_at ?? await getAutoFollowUpDate(),
         quoted_at: null,
         closed_at: null,
         renewal_date: null,

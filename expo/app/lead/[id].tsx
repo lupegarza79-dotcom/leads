@@ -29,6 +29,12 @@ import {
   CalendarPlus,
   Home,
   AlertTriangle,
+  User,
+  Target,
+  ShieldAlert,
+  Handshake,
+  CircleDot,
+  ArrowRight,
 } from 'lucide-react-native';
 import { Colors, StatusColors } from '@/constants/colors';
 import { PIPELINE_STATUSES, ACTIVITY_TYPES } from '@/constants/config';
@@ -40,7 +46,7 @@ import { ActivityItem } from '@/components/ActivityItem';
 import { ActionToast, type ToastType } from '@/components/ActionToast';
 import { ObservabilityPanel } from '@/components/ObservabilityPanel';
 import { formatPhone, formatDateTime, formatDate, formatCurrency, getWhatsAppUrl, getDialerUrl } from '@/utils/formatters';
-import { getEscalationInfo } from '@/utils/escalation';
+import { getEscalationInfo, formatEscalationTime } from '@/utils/escalation';
 import { withTimeout } from '@/utils/with-timeout';
 import { isLeadIncomplete, getMissingQuoteFields, CARRIERS } from '@/utils/lead-helpers';
 
@@ -50,6 +56,22 @@ interface LastActionResult {
   type: 'success' | 'error';
   message: string;
   at: string;
+}
+
+interface Commitment {
+  id: string;
+  note: string;
+  date: string;
+}
+
+function parseCommitments(activities: { id: string; note: string; created_at: string }[]): Commitment[] {
+  return activities
+    .filter(a => a.note.includes('[COMMITMENT]') || a.note.includes('[PROMISE]'))
+    .map(a => ({
+      id: a.id,
+      note: a.note.replace('[COMMITMENT]', '').replace('[PROMISE]', '').trim(),
+      date: a.created_at,
+    }));
 }
 
 export default function LeadDetailScreen() {
@@ -77,8 +99,10 @@ export default function LeadDetailScreen() {
   const [activeSection, setActiveSection] = useState<Section>('details');
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const [showActivityForm, setShowActivityForm] = useState(false);
+  const [showCommitmentForm, setShowCommitmentForm] = useState(false);
   const [activityType, setActivityType] = useState<ActivityType>('call');
   const [activityNote, setActivityNote] = useState('');
+  const [commitmentNote, setCommitmentNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [isEditing, setIsEditing] = useState(false);
@@ -132,6 +156,36 @@ export default function LeadDetailScreen() {
   const assignableUsers = useMemo(() => {
     return mgUsers.filter(u => u.role === 'producer' || u.role === 'orchestrator');
   }, [mgUsers]);
+
+  const commitments = useMemo(() => {
+    return parseCommitments(leadActivities);
+  }, [leadActivities]);
+
+  const isActive = lead ? lead.status !== 'Closed' && lead.status !== 'Lost' : false;
+
+  const nextActionLabel = useMemo(() => {
+    if (!lead) return null;
+    if (!isActive) return null;
+
+    if (lead.status === 'New') {
+      return { action: 'Contact this lead immediately', urgency: 'critical' as const };
+    }
+    if (!lead.next_followup_at) {
+      return { action: 'No follow-up scheduled — set one now', urgency: 'warning' as const };
+    }
+    const now = new Date();
+    const fuDate = new Date(lead.next_followup_at);
+    const diffMs = fuDate.getTime() - now.getTime();
+
+    if (diffMs < 0) {
+      const overdueMin = Math.abs(Math.round(diffMs / 60000));
+      return { action: `Follow-up overdue by ${formatEscalationTime(overdueMin)}`, urgency: 'critical' as const };
+    }
+    if (diffMs < 30 * 60000) {
+      return { action: `Follow-up due in ${formatEscalationTime(Math.round(diffMs / 60000))}`, urgency: 'warning' as const };
+    }
+    return { action: `Next follow-up: ${formatDateTime(lead.next_followup_at)}`, urgency: 'ok' as const };
+  }, [lead, isActive]);
 
   const resetSubmitting = useCallback(() => {
     setIsSubmitting(false);
@@ -316,6 +370,27 @@ export default function LeadDetailScreen() {
     }
   }, [lead, activityType, activityNote, addActivity, appUser, showToast, resetSubmitting]);
 
+  const handleAddCommitment = useCallback(async () => {
+    if (!lead || !commitmentNote.trim() || !appUser?.id || submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      await withTimeout(addActivity({
+        lead_id: lead.id,
+        user_id: appUser.id,
+        type: 'note',
+        note: `[COMMITMENT] ${commitmentNote.trim()}`,
+      }));
+      setCommitmentNote('');
+      setShowCommitmentForm(false);
+      showToast('success', 'Commitment recorded');
+    } catch (e: any) {
+      showToast('error', e?.message ?? 'Failed to save commitment');
+    } finally {
+      resetSubmitting();
+    }
+  }, [lead, commitmentNote, addActivity, appUser, showToast, resetSubmitting]);
+
   const handleCompleteFollowUp = useCallback(async (taskId: string) => {
     try {
       await withTimeout(completeFollowUp(taskId));
@@ -361,6 +436,12 @@ export default function LeadDetailScreen() {
     );
   }
 
+  const urgencyColors = {
+    critical: { bg: Colors.dangerMuted, border: Colors.danger + '33', text: Colors.danger, icon: Colors.danger },
+    warning: { bg: Colors.warningMuted, border: Colors.warning + '33', text: Colors.warning, icon: Colors.warning },
+    ok: { bg: Colors.surfaceElevated, border: Colors.border, text: Colors.textSecondary, icon: Colors.textTertiary },
+  };
+
   return (
     <>
       <Stack.Screen
@@ -376,6 +457,8 @@ export default function LeadDetailScreen() {
       <View style={styles.wrapper}>
         <ActionToast visible={toastVisible} type={toastType} message={toastMessage} onDismiss={dismissToast} />
         <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+          {/* === HEADER === */}
           <View style={styles.header}>
             <View style={styles.headerTop}>
               <View style={styles.headerBadges}>
@@ -387,11 +470,14 @@ export default function LeadDetailScreen() {
                   </View>
                 )}
               </View>
-              {escalation && (
-                <View style={[styles.slaPill, { backgroundColor: escalation.bgColor }]}>
-                  <View style={[styles.slaDot, { backgroundColor: escalation.color }]} />
-                  <Text style={[styles.slaText, { color: escalation.color }]}>
+              {escalation && escalation.state !== 'healthy' && (
+                <View style={[styles.escalationPill, { backgroundColor: escalation.bgColor }]}>
+                  <View style={[styles.escalationDot, { backgroundColor: escalation.color }]} />
+                  <Text style={[styles.escalationText, { color: escalation.color }]}>
                     {escalation.label}
+                    {escalation.minutesOverdue != null && escalation.minutesOverdue > 0
+                      ? ` +${formatEscalationTime(escalation.minutesOverdue)}`
+                      : ''}
                   </Text>
                 </View>
               )}
@@ -412,34 +498,47 @@ export default function LeadDetailScreen() {
               )}
               <View style={styles.infoRow}>
                 <MapPin size={14} color={Colors.textTertiary} />
-                <Text style={styles.infoText}>{lead.office} Office</Text>
+                <Text style={styles.infoText}>{lead.office} · {lead.source}</Text>
               </View>
-              {owner && (
-                <View style={styles.infoRow}>
-                  <Text style={styles.ownerLabel}>Assigned:</Text>
-                  <Text style={styles.ownerName}>{owner.name}</Text>
-                </View>
-              )}
-              {lead.next_followup_at && (
-                <View style={styles.infoRow}>
-                  <Calendar size={14} color={Colors.warning} />
-                  <Text style={[styles.infoText, { color: Colors.warning }]}>
-                    Next: {formatDateTime(lead.next_followup_at)}
-                  </Text>
-                </View>
-              )}
             </View>
 
-            {incomplete && missingFields.length > 0 && (
-              <View style={styles.incompleteBar}>
-                <AlertTriangle size={12} color={Colors.warning} />
-                <Text style={styles.incompleteBarText}>
-                  Missing: {missingFields.join(', ')}
-                </Text>
-              </View>
-            )}
+            {/* OWNER ROW */}
+            <View style={styles.ownerRow}>
+              <User size={14} color={owner ? Colors.primary : Colors.warning} />
+              <Text style={[styles.ownerText, !owner && { color: Colors.warning }]}>
+                {owner ? owner.name : 'Unassigned'}
+              </Text>
+              {owner && <Text style={styles.ownerRole}>{owner.role}</Text>}
+            </View>
           </View>
 
+          {/* === NEXT ACTION CARD === */}
+          {nextActionLabel && (
+            <TouchableOpacity
+              style={[
+                styles.nextActionCard,
+                {
+                  backgroundColor: urgencyColors[nextActionLabel.urgency].bg,
+                  borderColor: urgencyColors[nextActionLabel.urgency].border,
+                },
+              ]}
+              onPress={handleOpenComposer}
+              activeOpacity={0.8}
+            >
+              <View style={styles.nextActionLeft}>
+                <Target size={16} color={urgencyColors[nextActionLabel.urgency].icon} />
+                <View style={styles.nextActionTextWrap}>
+                  <Text style={styles.nextActionTitle}>NEXT ACTION</Text>
+                  <Text style={[styles.nextActionBody, { color: urgencyColors[nextActionLabel.urgency].text }]}>
+                    {nextActionLabel.action}
+                  </Text>
+                </View>
+              </View>
+              <ArrowRight size={16} color={urgencyColors[nextActionLabel.urgency].icon} />
+            </TouchableOpacity>
+          )}
+
+          {/* === QUICK ACTIONS === */}
           <View style={styles.quickActions}>
             <TouchableOpacity style={styles.qaBtn} onPress={handleCall}>
               <Phone size={18} color="#22C55E" />
@@ -455,14 +554,15 @@ export default function LeadDetailScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* === ACTION BUTTONS === */}
           <View style={styles.actions}>
             <TouchableOpacity style={styles.actionBtn} onPress={() => setShowStatusPicker(!showStatusPicker)}>
               <ChevronRight size={16} color={Colors.primary} />
-              <Text style={styles.actionText}>Change Status</Text>
+              <Text style={styles.actionText}>Status</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionBtn} onPress={() => setShowActivityForm(!showActivityForm)}>
               <MessageCircle size={16} color={Colors.primary} />
-              <Text style={styles.actionText}>Log Activity</Text>
+              <Text style={styles.actionText}>Log</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionBtn} onPress={startEdit}>
               <Edit3 size={16} color={Colors.primary} />
@@ -470,6 +570,88 @@ export default function LeadDetailScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* === MISSING ITEMS SECTION === */}
+          {incomplete && missingFields.length > 0 && (
+            <View style={styles.missingSection}>
+              <View style={styles.missingSectionHeader}>
+                <ShieldAlert size={14} color={Colors.warning} />
+                <Text style={styles.missingSectionTitle}>MISSING ITEMS</Text>
+              </View>
+              <View style={styles.missingList}>
+                {missingFields.map((field, idx) => (
+                  <View key={idx} style={styles.missingItem}>
+                    <CircleDot size={10} color={Colors.warning} />
+                    <Text style={styles.missingItemText}>{field}</Text>
+                  </View>
+                ))}
+              </View>
+              <TouchableOpacity style={styles.missingFixBtn} onPress={startEdit}>
+                <Edit3 size={12} color={Colors.warning} />
+                <Text style={styles.missingFixText}>Fill missing fields</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* === COMMITMENTS SECTION === */}
+          <View style={styles.commitmentsSection}>
+            <View style={styles.commitmentsSectionHeader}>
+              <Handshake size={14} color={Colors.cyan} />
+              <Text style={styles.commitmentsSectionTitle}>COMMITMENTS & PROMISES</Text>
+              <TouchableOpacity
+                style={styles.addCommitmentBtn}
+                onPress={() => setShowCommitmentForm(!showCommitmentForm)}
+              >
+                <Text style={styles.addCommitmentText}>+ Add</Text>
+              </TouchableOpacity>
+            </View>
+
+            {showCommitmentForm && (
+              <View style={styles.commitmentForm}>
+                <TextInput
+                  style={styles.commitmentInput}
+                  value={commitmentNote}
+                  onChangeText={setCommitmentNote}
+                  placeholder="e.g. Promised to send docs by Friday"
+                  placeholderTextColor={Colors.textTertiary}
+                  multiline
+                  numberOfLines={2}
+                  textAlignVertical="top"
+                />
+                <View style={styles.commitmentFormActions}>
+                  <TouchableOpacity
+                    style={[styles.commitmentSaveBtn, (!commitmentNote.trim() || isSubmitting) && styles.btnDisabled]}
+                    onPress={handleAddCommitment}
+                    disabled={!commitmentNote.trim() || isSubmitting}
+                  >
+                    {isSubmitting ? (
+                      <ActivityIndicator color={Colors.white} size="small" />
+                    ) : (
+                      <Text style={styles.commitmentSaveText}>Save</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => { setShowCommitmentForm(false); setCommitmentNote(''); }}>
+                    <Text style={styles.commitmentCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {commitments.length === 0 && !showCommitmentForm ? (
+              <Text style={styles.emptyCommitmentsText}>No commitments recorded</Text>
+            ) : (
+              commitments.map(c => (
+                <View key={c.id} style={styles.commitmentRow}>
+                  <Handshake size={11} color={Colors.cyan} />
+                  <View style={styles.commitmentContent}>
+                    <Text style={styles.commitmentText}>{c.note}</Text>
+                    <Text style={styles.commitmentDate}>{formatDateTime(c.date)}</Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+
+          {/* === EDIT FORM === */}
           {isEditing && (
             <View style={styles.editForm}>
               <View style={styles.editHeader}>
@@ -570,7 +752,7 @@ export default function LeadDetailScreen() {
                 />
               </View>
               <TouchableOpacity
-                style={[styles.saveBtn, isSubmitting && styles.saveBtnDisabled]}
+                style={[styles.saveBtn, isSubmitting && styles.btnDisabled]}
                 onPress={handleSaveEdit}
                 disabled={isSubmitting}
               >
@@ -586,6 +768,7 @@ export default function LeadDetailScreen() {
             </View>
           )}
 
+          {/* === STATUS PICKER === */}
           {showStatusPicker && (
             <View style={styles.statusPicker}>
               {isSubmitting && <ActivityIndicator color={Colors.primary} style={styles.loader} />}
@@ -608,6 +791,7 @@ export default function LeadDetailScreen() {
             </View>
           )}
 
+          {/* === ACTIVITY FORM === */}
           {showActivityForm && (
             <View style={styles.activityForm}>
               <Text style={styles.formTitle}>Log Activity</Text>
@@ -633,7 +817,7 @@ export default function LeadDetailScreen() {
                 textAlignVertical="top"
               />
               <TouchableOpacity
-                style={[styles.submitBtn, (!activityNote.trim() || isSubmitting) && styles.submitBtnDisabled]}
+                style={[styles.submitBtn, (!activityNote.trim() || isSubmitting) && styles.btnDisabled]}
                 onPress={handleAddActivity}
                 disabled={!activityNote.trim() || isSubmitting}
               >
@@ -646,6 +830,7 @@ export default function LeadDetailScreen() {
             </View>
           )}
 
+          {/* === TABS === */}
           <View style={styles.tabs}>
             {(['details', 'activity', 'followups', 'status'] as Section[]).map(section => (
               <TouchableOpacity
@@ -771,6 +956,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
   errorText: { color: Colors.textSecondary, fontSize: 16 },
   headerBtn: { padding: 4 },
+
   header: { padding: 20, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   headerBadges: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -785,38 +971,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.warning + '33',
   },
-  incompletePillText: {
-    color: Colors.warning,
-    fontSize: 10,
-    fontWeight: '700' as const,
-  },
-  incompleteBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: Colors.warningMuted,
-    borderWidth: 1,
-    borderColor: Colors.warning + '22',
-  },
-  incompleteBarText: {
-    color: Colors.warning,
-    fontSize: 11,
-    fontWeight: '500' as const,
-    flex: 1,
-  },
-  slaPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 5 },
-  slaDot: { width: 6, height: 6, borderRadius: 3 },
-  slaText: { fontSize: 11, fontWeight: '700' as const },
+  incompletePillText: { color: Colors.warning, fontSize: 10, fontWeight: '700' as const },
+  escalationPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 5 },
+  escalationDot: { width: 6, height: 6, borderRadius: 3 },
+  escalationText: { fontSize: 11, fontWeight: '700' as const },
   leadName: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800' as const, marginBottom: 12, letterSpacing: -0.5 },
-  infoRows: { gap: 8 },
+  infoRows: { gap: 6 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   infoText: { color: Colors.textSecondary, fontSize: 14 },
-  ownerLabel: { color: Colors.textTertiary, fontSize: 13 },
-  ownerName: { color: Colors.primary, fontSize: 13, fontWeight: '600' as const },
+  ownerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  ownerText: { color: Colors.primary, fontSize: 14, fontWeight: '700' as const },
+  ownerRole: { color: Colors.textTertiary, fontSize: 12, textTransform: 'capitalize' as const },
+
+  nextActionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  nextActionLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  nextActionTextWrap: { flex: 1 },
+  nextActionTitle: { color: Colors.textTertiary, fontSize: 9, fontWeight: '800' as const, letterSpacing: 1, marginBottom: 2 },
+  nextActionBody: { fontSize: 13, fontWeight: '600' as const },
+
   quickActions: {
     flexDirection: 'row',
     gap: 10,
@@ -835,10 +1024,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  qaBtnAccent: {
-    backgroundColor: Colors.primaryMuted,
-    borderColor: Colors.primary + '33',
-  },
+  qaBtnAccent: { backgroundColor: Colors.primaryMuted, borderColor: Colors.primary + '33' },
   qaText: { fontSize: 12, fontWeight: '700' as const },
   actions: { flexDirection: 'row', gap: 8, padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   actionBtn: {
@@ -854,6 +1040,101 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary + '33',
   },
   actionText: { color: Colors.primary, fontSize: 12, fontWeight: '600' as const },
+
+  missingSection: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: Colors.warningMuted,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.warning + '22',
+    overflow: 'hidden',
+  },
+  missingSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.warning + '15',
+  },
+  missingSectionTitle: { color: Colors.warning, fontSize: 10, fontWeight: '800' as const, letterSpacing: 0.8 },
+  missingList: { paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
+  missingItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  missingItemText: { color: Colors.warning, fontSize: 12, fontWeight: '500' as const },
+  missingFixBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.warning + '15',
+  },
+  missingFixText: { color: Colors.warning, fontSize: 12, fontWeight: '700' as const },
+
+  commitmentsSection: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  commitmentsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  commitmentsSectionTitle: { color: Colors.textSecondary, fontSize: 10, fontWeight: '800' as const, letterSpacing: 0.8, flex: 1 },
+  addCommitmentBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: Colors.cyanMuted,
+  },
+  addCommitmentText: { color: Colors.cyan, fontSize: 11, fontWeight: '700' as const },
+  commitmentForm: { paddingHorizontal: 14, paddingVertical: 10 },
+  commitmentInput: {
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: Colors.textPrimary,
+    fontSize: 13,
+    minHeight: 50,
+  },
+  commitmentFormActions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  commitmentSaveBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.cyan,
+  },
+  commitmentSaveText: { color: Colors.white, fontSize: 12, fontWeight: '700' as const },
+  commitmentCancelText: { color: Colors.textTertiary, fontSize: 12 },
+  emptyCommitmentsText: { color: Colors.textTertiary, fontSize: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  commitmentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  commitmentContent: { flex: 1 },
+  commitmentText: { color: Colors.textPrimary, fontSize: 13, fontWeight: '500' as const },
+  commitmentDate: { color: Colors.textTertiary, fontSize: 10, marginTop: 2 },
+
   editForm: { padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   editHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   editSectionLabel: {
@@ -902,7 +1183,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     marginTop: 4,
   },
-  saveBtnDisabled: { opacity: 0.5 },
+  btnDisabled: { opacity: 0.5 },
   saveBtnText: { color: Colors.white, fontSize: 14, fontWeight: '600' as const },
   statusPicker: { padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border },
   loader: { marginBottom: 8 },
@@ -919,9 +1200,8 @@ const styles = StyleSheet.create({
   typeChipTextActive: { color: Colors.primary },
   noteInput: { backgroundColor: Colors.surface, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, padding: 14, color: Colors.textPrimary, fontSize: 14, minHeight: 80, marginBottom: 12 },
   submitBtn: { backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  submitBtnDisabled: { opacity: 0.5 },
   submitText: { color: Colors.white, fontSize: 14, fontWeight: '600' as const },
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border },
+  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border, marginTop: 4 },
   tab: { flex: 1, paddingVertical: 14, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: Colors.transparent },
   tabActive: { borderBottomColor: Colors.primary },
   tabText: { color: Colors.textTertiary, fontSize: 13, fontWeight: '600' as const },
