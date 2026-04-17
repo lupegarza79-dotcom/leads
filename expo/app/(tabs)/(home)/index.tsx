@@ -93,7 +93,7 @@ export default function PipelineScreen() {
 
   const visibleCount = isDesktop ? activeStatuses.length : isWide ? 3 : 1;
   const columnWidth = isDesktop
-    ? Math.floor((width - 60 - (activeStatuses.length - 1) * 12) / activeStatuses.length)
+    ? undefined
     : isWide
     ? Math.floor((width - 48 - 24) / 3)
     : width - 40;
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
   statusTabText: { fontSize: 11, fontWeight: '600' as const },
   countBubble: { color: Colors.textTertiary, fontSize: 10, fontWeight: '600' as const },
   columnsRow: { flex: 1, flexDirection: 'row', paddingHorizontal: 20, gap: 12 },
-  columnsRowDesktop: { paddingHorizontal: 16, gap: 10 },
+  columnsRowDesktop: { paddingHorizontal: 20, paddingTop: 8, gap: 14, width: '100%' as const, alignSelf: 'stretch' as const },
   column: { marginRight: 0 },
   columnDesktop: { flex: 1, minWidth: 0 },
   columnHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 4 },

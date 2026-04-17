@@ -210,7 +210,7 @@ export default function LeadDetailScreen() {
     setEditMonthlyPayment(lead.monthly_payment != null ? String(lead.monthly_payment) : '');
     setEditEffectiveDate(lead.effective_date ?? '');
     setIsEditing(true);
-  }, [lead]);
+  }, [lead, customCarriers]);
 
   const handleSaveEdit = useCallback(async () => {
     if (!lead || !appUser?.id || submittingRef.current) return;
@@ -725,49 +725,56 @@ export default function LeadDetailScreen() {
               <Text style={styles.editSectionLabel}>QUOTE & FINANCIALS</Text>
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Carrier</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.editChips}>
-                    {CARRIERS.map(c => (
-                      <TouchableOpacity
-                        key={c}
-                        style={[styles.editChip, editCarrier === c && styles.editChipActive]}
-                        onPress={() => setEditCarrier(editCarrier === c ? '' : c)}
-                      >
-                        <Text style={[styles.editChipText, editCarrier === c && styles.editChipTextActive]}>{c}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
+                <View style={styles.editChips}>
+                  {[...TOP_CARRIERS, ...customCarriers].filter((v, i, a) => a.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i).map(c => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.editChip, editCarrier === c && styles.editChipActive]}
+                      onPress={() => { setEditCarrier(editCarrier === c ? '' : c); setEditCustomCarrier(''); }}
+                    >
+                      <Text style={[styles.editChipText, editCarrier === c && styles.editChipTextActive]}>{c}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity
+                    style={[styles.editChip, editCarrier === '__custom__' && styles.editChipActive]}
+                    onPress={() => setEditCarrier(editCarrier === '__custom__' ? '' : '__custom__')}
+                  >
+                    <Text style={[styles.editChipText, editCarrier === '__custom__' && styles.editChipTextActive]}>Other / Custom</Text>
+                  </TouchableOpacity>
+                </View>
+                {editCarrier === '__custom__' && (
+                  <TextInput
+                    style={[styles.editInput, { marginTop: 8 }]}
+                    value={editCustomCarrier}
+                    onChangeText={setEditCustomCarrier}
+                    placeholder="Enter carrier name"
+                    placeholderTextColor={Colors.textTertiary}
+                  />
+                )}
               </View>
               <View style={styles.editFieldRow}>
-                <View style={styles.editFieldHalf}>
-                  <Text style={styles.editLabel}>Amount Due</Text>
-                  <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
-                </View>
                 <View style={styles.editFieldHalf}>
                   <Text style={styles.editLabel}>Quote Price</Text>
                   <TextInput style={styles.editInput} value={editQuotePrice} onChangeText={setEditQuotePrice} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
                 </View>
-              </View>
-              <View style={styles.editFieldRow}>
-                <View style={styles.editFieldHalf}>
-                  <Text style={styles.editLabel}>Premium Amount</Text>
-                  <TextInput style={styles.editInput} value={editPremiumAmount} onChangeText={setEditPremiumAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
-                </View>
-                <View style={styles.editFieldHalf}>
-                  <Text style={styles.editLabel}>Effective Date</Text>
-                  <TextInput style={styles.editInput} value={editEffectiveDate} onChangeText={setEditEffectiveDate} placeholder="MM/DD/YYYY" placeholderTextColor={Colors.textTertiary} />
-                </View>
-              </View>
-              <View style={styles.editFieldRow}>
                 <View style={styles.editFieldHalf}>
                   <Text style={styles.editLabel}>Down Payment</Text>
                   <TextInput style={styles.editInput} value={editDownPayment} onChangeText={setEditDownPayment} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
                 </View>
+              </View>
+              <View style={styles.editFieldRow}>
                 <View style={styles.editFieldHalf}>
                   <Text style={styles.editLabel}>Monthly Payment</Text>
                   <TextInput style={styles.editInput} value={editMonthlyPayment} onChangeText={setEditMonthlyPayment} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
                 </View>
+                <View style={styles.editFieldHalf}>
+                  <Text style={styles.editLabel}>Total Due Today</Text>
+                  <TextInput style={styles.editInput} value={editAmount} onChangeText={setEditAmount} keyboardType="numeric" placeholder="0" placeholderTextColor={Colors.textTertiary} />
+                </View>
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Effective Date</Text>
+                <TextInput style={styles.editInput} value={editEffectiveDate} onChangeText={setEditEffectiveDate} placeholder="MM/DD/YYYY" placeholderTextColor={Colors.textTertiary} />
               </View>
 
               <Text style={styles.editSectionLabel}>NOTES</Text>

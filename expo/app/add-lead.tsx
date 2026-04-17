@@ -18,8 +18,9 @@ import { LEAD_SOURCES } from '@/constants/config';
 import type { LeadSource } from '@/constants/config';
 import { useLeads } from '@/providers/LeadsProvider';
 import { addBusinessDays } from '@/utils/business-hours';
-import { CARRIERS } from '@/utils/lead-helpers';
+import { TOP_CARRIERS } from '@/utils/lead-helpers';
 import { withTimeout } from '@/utils/with-timeout';
+import { useCustomCarriers } from '@/providers/CustomCarriersProvider';
 
 function getQuickFollowUpOptions(): { label: string; value: Date }[] {
   const now = new Date();
@@ -58,6 +59,7 @@ function formatPickerDate(date: Date): string {
 export default function AddLeadScreen() {
   const router = useRouter();
   const { addLead, mgUsers } = useLeads();
+  const { customCarriers, addCustomCarrier } = useCustomCarriers();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [fullName, setFullName] = useState('');
@@ -72,8 +74,8 @@ export default function AddLeadScreen() {
   const [downPayment, setDownPayment] = useState('');
   const [monthlyPayment, setMonthlyPayment] = useState('');
   const [quotePrice, setQuotePrice] = useState('');
-  const [premiumAmount, setPremiumAmount] = useState('');
   const [carrier, setCarrier] = useState('');
+  const [customCarrier, setCustomCarrier] = useState('');
   const [effectiveDate, setEffectiveDate] = useState('');
 
   const assignableUsers = useMemo(() => {
@@ -82,12 +84,19 @@ export default function AddLeadScreen() {
 
   const quickOptions = useMemo(() => getQuickFollowUpOptions(), []);
 
-  const computedTotalPremium = useMemo(() => {
-    const dp = parseFloat(downPayment || '0');
-    const mp = parseFloat(monthlyPayment || '0');
-    if (dp > 0 || mp > 0) return dp + mp;
-    return null;
-  }, [downPayment, monthlyPayment]);
+  const carrierOptions = useMemo(() => {
+    const merged = [...TOP_CARRIERS, ...customCarriers];
+    const seen = new Set<string>();
+    return merged.filter((c) => {
+      const k = c.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [customCarriers]);
+
+  const isCustomMode = carrier === '__custom__';
+  const effectiveCarrier = isCustomMode ? customCarrier : carrier;
 
   const handleSubmit = useCallback(async () => {
     if (!phone.trim()) {
@@ -132,10 +141,6 @@ export default function AddLeadScreen() {
       Alert.alert('Invalid', 'Quote price must be a valid non-negative number.');
       return;
     }
-    if (premiumAmount && (isNaN(parseFloat(premiumAmount)) || parseFloat(premiumAmount) < 0)) {
-      Alert.alert('Invalid', 'Premium amount must be a valid non-negative number.');
-      return;
-    }
     if (isSubmitting) return;
 
     setIsSubmitting(true);
@@ -152,12 +157,13 @@ export default function AddLeadScreen() {
         next_followup_at: nextFollowUp ? nextFollowUp.toISOString() : undefined,
         down_payment: downPayment ? parseFloat(downPayment) : undefined,
         monthly_payment: monthlyPayment ? parseFloat(monthlyPayment) : undefined,
-        total_premium: computedTotalPremium ?? undefined,
         quote_price: quotePrice ? parseFloat(quotePrice) : undefined,
-        premium_amount: premiumAmount ? parseFloat(premiumAmount) : undefined,
-        carrier: carrier.trim() || undefined,
+        carrier: effectiveCarrier.trim() || undefined,
         effective_date: effectiveDate.trim() || undefined,
       }), 15000);
+      if (isCustomMode && customCarrier.trim()) {
+        addCustomCarrier(customCarrier.trim()).catch(() => {});
+      }
       if (result.wasUpdated) {
         console.log('[AddLead] Existing lead updated via phone match');
         Alert.alert(
@@ -175,18 +181,17 @@ export default function AddLeadScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [fullName, phone, source, ownerId, notes, amountDue, nextFollowUp, downPayment, monthlyPayment, quotePrice, premiumAmount, carrier, effectiveDate, computedTotalPremium, addLead, router, isSubmitting]);
+  }, [fullName, phone, source, ownerId, notes, amountDue, nextFollowUp, downPayment, monthlyPayment, quotePrice, effectiveCarrier, effectiveDate, addLead, router, isSubmitting, isCustomMode, customCarrier, addCustomCarrier]);
 
   const optionalFieldCount = useMemo(() => {
     let count = 0;
     if (downPayment) count++;
     if (monthlyPayment) count++;
     if (quotePrice) count++;
-    if (premiumAmount) count++;
-    if (carrier) count++;
+    if (effectiveCarrier) count++;
     if (effectiveDate) count++;
     return count;
-  }, [downPayment, monthlyPayment, quotePrice, premiumAmount, carrier, effectiveDate]);
+  }, [downPayment, monthlyPayment, quotePrice, effectiveCarrier, effectiveDate]);
 
   return (
     <KeyboardAvoidingView
@@ -230,7 +235,7 @@ export default function AddLeadScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Amount & Follow-up</Text>
           <View style={styles.field}>
-            <Text style={styles.label}>Amount Due *</Text>
+            <Text style={styles.label}>Total Due Today *</Text>
             <TextInput
               style={styles.input}
               value={amountDue}
@@ -351,19 +356,33 @@ export default function AddLeadScreen() {
           <View style={styles.section}>
             <View style={styles.field}>
               <Text style={styles.label}>Carrier</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.carrierScroll}>
-                <View style={styles.chipRow}>
-                  {CARRIERS.map(c => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[styles.chip, carrier === c && styles.chipActive]}
-                      onPress={() => setCarrier(carrier === c ? '' : c)}
-                    >
-                      <Text style={[styles.chipText, carrier === c && styles.chipTextActive]}>{c}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+              <View style={styles.chipRow}>
+                {carrierOptions.map(c => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.chip, carrier === c && styles.chipActive]}
+                    onPress={() => { setCarrier(carrier === c ? '' : c); setCustomCarrier(''); }}
+                  >
+                    <Text style={[styles.chipText, carrier === c && styles.chipTextActive]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[styles.chip, isCustomMode && styles.chipActive]}
+                  onPress={() => setCarrier(isCustomMode ? '' : '__custom__')}
+                >
+                  <Text style={[styles.chipText, isCustomMode && styles.chipTextActive]}>Other / Custom</Text>
+                </TouchableOpacity>
+              </View>
+              {isCustomMode && (
+                <TextInput
+                  style={[styles.input, styles.customCarrierInput]}
+                  value={customCarrier}
+                  onChangeText={setCustomCarrier}
+                  placeholder="Enter carrier name"
+                  placeholderTextColor={Colors.textTertiary}
+                  testID="input-custom-carrier"
+                />
+              )}
             </View>
             <View style={styles.fieldRow}>
               <View style={styles.halfField}>
@@ -379,20 +398,6 @@ export default function AddLeadScreen() {
                 />
               </View>
               <View style={styles.halfField}>
-                <Text style={styles.label}>Premium Amount</Text>
-                <TextInput
-                  style={styles.input}
-                  value={premiumAmount}
-                  onChangeText={setPremiumAmount}
-                  placeholder="$0"
-                  placeholderTextColor={Colors.textTertiary}
-                  keyboardType="numeric"
-                  testID="input-premium-amount"
-                />
-              </View>
-            </View>
-            <View style={styles.fieldRow}>
-              <View style={styles.halfField}>
                 <Text style={styles.label}>Down Payment</Text>
                 <TextInput
                   style={styles.input}
@@ -404,6 +409,8 @@ export default function AddLeadScreen() {
                   testID="input-down-payment"
                 />
               </View>
+            </View>
+            <View style={styles.fieldRow}>
               <View style={styles.halfField}>
                 <Text style={styles.label}>Monthly Payment</Text>
                 <TextInput
@@ -416,25 +423,19 @@ export default function AddLeadScreen() {
                   testID="input-monthly-payment"
                 />
               </View>
-            </View>
-            {computedTotalPremium !== null && (
-              <View style={styles.autoCalcRow}>
-                <Text style={styles.autoCalcLabel}>Total Premium (auto)</Text>
-                <Text style={styles.autoCalcValue}>
-                  ${computedTotalPremium.toFixed(2)}
-                </Text>
+              <View style={styles.halfField}>
+                <Text style={styles.label}>Effective Date</Text>
+                <TextInput
+                  style={styles.input}
+                  value={effectiveDate}
+                  onChangeText={setEffectiveDate}
+                  placeholder="MM/DD/YYYY"
+                  placeholderTextColor={Colors.textTertiary}
+                  testID="input-effective-date"
+                />
               </View>
-            )}
-            <View style={styles.field}>
-              <Text style={styles.label}>Effective Date</Text>
-              <TextInput
-                style={styles.input}
-                value={effectiveDate}
-                onChangeText={setEffectiveDate}
-                placeholder="MM/DD/YYYY"
-                placeholderTextColor={Colors.textTertiary}
-                testID="input-effective-date"
-              />
+            </View>
+            <View style={[styles.field, styles.hiddenField]}>
             </View>
           </View>
         )}
@@ -647,6 +648,12 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 16,
     fontWeight: '700' as const,
+  },
+  customCarrierInput: {
+    marginTop: 10,
+  },
+  hiddenField: {
+    display: 'none' as const,
   },
   autoCalcRow: {
     flexDirection: 'row' as const,

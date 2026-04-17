@@ -39,6 +39,7 @@ import { addBusinessDays } from '@/utils/business-hours';
 import { getWhatsAppUrl, getDialerUrl, formatPhone } from '@/utils/formatters';
 import { ActionToast, type ToastType } from '@/components/ActionToast';
 import { withTimeout } from '@/utils/with-timeout';
+import { useResponsive } from '@/hooks/useResponsive';
 
 const CHANNEL_CONFIG: Record<FollowUpChannel, { icon: React.ElementType; color: string; label: string }> = {
   call: { icon: Phone, color: '#22C55E', label: 'Call' },
@@ -90,6 +91,7 @@ export default function FollowUpComposerScreen() {
   const router = useRouter();
   const { getLeadById, updateLead, addActivity, mgUsers } = useLeads();
   const { appUser } = useAuth();
+  const { isWide } = useResponsive();
 
   const lead = getLeadById(leadId ?? '');
 
@@ -293,11 +295,11 @@ export default function FollowUpComposerScreen() {
           <ActionToast visible={toastVisible} type={toastType} message={toastMessage} onDismiss={dismissToast} />
           <ScrollView
             style={styles.container}
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, isWide && styles.contentWide]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <View style={styles.leadSummary}>
+            <View style={[styles.leadSummary, isWide && styles.leadSummaryWide]}>
               <Text style={styles.leadName}>{lead.full_name}</Text>
               <Text style={styles.leadPhone}>{formatPhone(lead.phone)}</Text>
               {lead.next_followup_at && (
@@ -307,7 +309,8 @@ export default function FollowUpComposerScreen() {
               )}
             </View>
 
-            <View style={styles.section}>
+            <View style={isWide ? styles.twoCol : undefined}>
+            <View style={[styles.section, isWide && styles.sectionWide]}>
               <Text style={styles.sectionTitle}>When</Text>
               <View style={styles.presetsRow}>
                 {quickPresets.map((preset, idx) => {
@@ -361,7 +364,7 @@ export default function FollowUpComposerScreen() {
               )}
             </View>
 
-            <View style={styles.section}>
+            <View style={[styles.section, isWide && styles.sectionWide]}>
               <Text style={styles.sectionTitle}>Channel</Text>
               <View style={styles.chipsRow}>
                 {FOLLOW_UP_CHANNELS.map(ch => {
@@ -384,7 +387,7 @@ export default function FollowUpComposerScreen() {
               </View>
             </View>
 
-            <View style={styles.section}>
+            <View style={[styles.section, isWide && styles.sectionWide]}>
               <Text style={styles.sectionTitle}>Priority</Text>
               <View style={styles.chipsRow}>
                 {FOLLOW_UP_PRIORITIES.map(p => {
@@ -406,7 +409,7 @@ export default function FollowUpComposerScreen() {
               </View>
             </View>
 
-            <View style={styles.section}>
+            <View style={[styles.section, isWide && styles.sectionWide]}>
               <Text style={styles.sectionTitle}>Reason</Text>
               <View style={styles.chipsRow}>
                 {FOLLOW_UP_REASONS.map(r => {
@@ -426,7 +429,7 @@ export default function FollowUpComposerScreen() {
               </View>
             </View>
 
-            <View style={styles.section}>
+            <View style={[styles.section, isWide && styles.sectionWide]}>
               <Text style={styles.sectionTitle}>Assigned To</Text>
               <View style={styles.chipsRow}>
                 {assignableUsers.map(u => {
@@ -446,7 +449,7 @@ export default function FollowUpComposerScreen() {
               </View>
             </View>
 
-            <View style={styles.section}>
+            <View style={[styles.section, isWide && styles.sectionWide, isWide && styles.notesSectionWide]}>
               <Text style={styles.sectionTitle}>Notes</Text>
               <TextInput
                 style={styles.notesInput}
@@ -455,14 +458,15 @@ export default function FollowUpComposerScreen() {
                 placeholder="Add notes about this follow-up..."
                 placeholderTextColor={Colors.textTertiary}
                 multiline
-                numberOfLines={3}
+                numberOfLines={isWide ? 2 : 3}
                 textAlignVertical="top"
               />
             </View>
+            </View>
 
-            <View style={styles.actionsSection}>
+            <View style={[styles.actionsSection, isWide && styles.actionsSectionWide]}>
               <TouchableOpacity
-                style={[styles.actionBtnPrimary, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
+                style={[styles.actionBtnPrimary, isWide && styles.actionBtnPrimaryWide, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
                 onPress={() => handleSave('save_log')}
                 disabled={!selectedDate || isSubmitting}
               >
@@ -476,7 +480,7 @@ export default function FollowUpComposerScreen() {
                 )}
               </TouchableOpacity>
 
-              <View style={styles.secondaryActions}>
+              <View style={[styles.secondaryActions, isWide && styles.secondaryActionsWide]}>
                 <TouchableOpacity
                   style={[styles.actionBtnSecondary, (!selectedDate || isSubmitting) && styles.actionBtnDisabled]}
                   onPress={() => handleSave('save')}
@@ -509,7 +513,7 @@ export default function FollowUpComposerScreen() {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.cancelBtn} onPress={handleGoBack}>
+            <TouchableOpacity style={[styles.cancelBtn, isWide && styles.cancelBtnWide]} onPress={handleGoBack}>
               <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
 
@@ -525,6 +529,15 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { flex: 1, backgroundColor: Colors.background },
   content: { paddingHorizontal: 20, paddingTop: 12 },
+  contentWide: { paddingHorizontal: 32, paddingTop: 16, maxWidth: 980, width: '100%' as const, alignSelf: 'center' as const },
+  twoCol: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 20 },
+  sectionWide: { marginBottom: 14, flexBasis: '48%' as const, flexGrow: 1 },
+  notesSectionWide: { flexBasis: '100%' as const },
+  leadSummaryWide: { marginBottom: 14, paddingVertical: 12 },
+  actionsSectionWide: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'center' as const, gap: 10, marginTop: 4 },
+  actionBtnPrimaryWide: { flex: 1, paddingVertical: 11 },
+  secondaryActionsWide: { flex: 1 },
+  cancelBtnWide: { marginTop: 8, paddingVertical: 10, alignSelf: 'flex-start' as const, paddingHorizontal: 24 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background, gap: 16 },
   errorText: { color: Colors.textSecondary, fontSize: 16 },
   goHomeBtn: {
