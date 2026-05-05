@@ -89,6 +89,46 @@ GRANT EXECUTE ON FUNCTION public.is_manager_or_orchestrator()  TO authenticated,
 GRANT EXECUTE ON FUNCTION public.is_producer()                 TO authenticated, service_role;
 
 -- =========================================================================
+-- 2b. Drop ALL legacy policies on the 5 target tables (dynamic, by pg_policies)
+--
+-- We don't trust that legacy policy names match what we expect, so we drop
+-- every policy that currently exists on these tables before recreating the
+-- official set below. mg_follow_up_tasks is included only if it exists.
+-- =========================================================================
+DO $legacy$
+DECLARE
+  r record;
+  target_tables text[] := ARRAY[
+    'mg_leads',
+    'mg_activity_log',
+    'mg_follow_up_tasks',
+    'mg_users',
+    'mg_escalation_log'
+  ];
+  t text;
+BEGIN
+  FOREACH t IN ARRAY target_tables LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = t AND c.relkind = 'r'
+    ) THEN
+      RAISE NOTICE 'Skipping legacy-policy drop: table public.% does not exist', t;
+      CONTINUE;
+    END IF;
+
+    FOR r IN
+      SELECT policyname
+      FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = t
+    LOOP
+      EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, t);
+    END LOOP;
+  END LOOP;
+END
+$legacy$;
+
+-- =========================================================================
 -- 3. RLS: mg_users
 --
 -- Recursion-safe: policies only reference auth.uid() directly OR call the
@@ -96,12 +136,6 @@ GRANT EXECUTE ON FUNCTION public.is_producer()                 TO authenticated,
 -- mg_users from within an mg_users policy.
 -- =========================================================================
 ALTER TABLE public.mg_users ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "mg_users_select_self"           ON public.mg_users;
-DROP POLICY IF EXISTS "mg_users_select_managers"       ON public.mg_users;
-DROP POLICY IF EXISTS "mg_users_update_self"           ON public.mg_users;
-DROP POLICY IF EXISTS "mg_users_insert_managers"       ON public.mg_users;
-DROP POLICY IF EXISTS "mg_users_delete_managers"       ON public.mg_users;
 
 -- Each authenticated user can read their own row (no recursion: only auth.uid()).
 CREATE POLICY "mg_users_select_self"
@@ -140,15 +174,9 @@ CREATE POLICY "mg_users_delete_managers"
 
 -- =========================================================================
 -- 4. RLS: mg_leads
+-- (Legacy policies already cleared in section 2b.)
 -- =========================================================================
 ALTER TABLE public.mg_leads ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "mg_leads_select_managers"   ON public.mg_leads;
-DROP POLICY IF EXISTS "mg_leads_select_producers"  ON public.mg_leads;
-DROP POLICY IF EXISTS "mg_leads_insert_auth"       ON public.mg_leads;
-DROP POLICY IF EXISTS "mg_leads_update_managers"   ON public.mg_leads;
-DROP POLICY IF EXISTS "mg_leads_update_producers"  ON public.mg_leads;
-DROP POLICY IF EXISTS "mg_leads_delete_managers"   ON public.mg_leads;
 
 CREATE POLICY "mg_leads_select_managers"
   ON public.mg_leads
@@ -190,12 +218,9 @@ CREATE POLICY "mg_leads_delete_managers"
 
 -- =========================================================================
 -- 5. RLS: mg_activity_log
+-- (Legacy policies already cleared in section 2b.)
 -- =========================================================================
 ALTER TABLE public.mg_activity_log ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "mg_activity_select_managers"  ON public.mg_activity_log;
-DROP POLICY IF EXISTS "mg_activity_select_producers" ON public.mg_activity_log;
-DROP POLICY IF EXISTS "mg_activity_insert_auth"      ON public.mg_activity_log;
 
 CREATE POLICY "mg_activity_select_managers"
   ON public.mg_activity_log
@@ -226,11 +251,7 @@ CREATE POLICY "mg_activity_insert_auth"
 -- 6. RLS: mg_escalation_log (edge functions only; UI never touches it)
 -- =========================================================================
 ALTER TABLE public.mg_escalation_log ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Service role full access on mg_escalation_log"
-  ON public.mg_escalation_log;
-DROP POLICY IF EXISTS "mg_escalation_select_managers"
-  ON public.mg_escalation_log;
+-- (Legacy policies already cleared in section 2b.)
 
 CREATE POLICY "mg_escalation_select_managers"
   ON public.mg_escalation_log
@@ -249,8 +270,11 @@ CREATE POLICY "mg_escalation_select_managers"
 -- parent lead's contacted_at (only on first contact, so escalation logic
 -- doesn't get reset by every subsequent note).
 --
--- Follow-up activity types must match the edge function constant
--- FOLLOWUP_ACTIVITY_TYPES: call, whatsapp, email, note, follow_up
+-- Follow-up rule (must match edge function hasFollowUp):
+--   call, whatsapp, email, follow_up           -> always count
+--   note                                       -> ONLY if note ILIKE '[FOLLOW-UP]%'
+-- Generic notes (e.g. "Lead created", "Lead edited") MUST NOT stamp
+-- contacted_at, otherwise escalation logic is silently bypassed.
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.mg_set_contacted_at()
@@ -258,9 +282,16 @@ RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
-AS $$
+AS $
+DECLARE
+  is_followup boolean;
 BEGIN
-  IF NEW.type IN ('call', 'whatsapp', 'email', 'note', 'follow_up') THEN
+  is_followup := (
+    NEW.type IN ('call', 'whatsapp', 'email', 'follow_up')
+    OR (NEW.type = 'note' AND NEW.note ILIKE '[FOLLOW-UP]%')
+  );
+
+  IF is_followup THEN
     UPDATE public.mg_leads
     SET contacted_at = COALESCE(contacted_at, NEW.created_at, now())
     WHERE id = NEW.lead_id
@@ -268,7 +299,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$;
+$;
 
 DROP TRIGGER IF EXISTS trg_mg_activity_set_contacted_at ON public.mg_activity_log;
 CREATE TRIGGER trg_mg_activity_set_contacted_at

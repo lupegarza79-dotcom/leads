@@ -22,7 +22,11 @@ const OPERATIONAL_MINUTES = 30;
 const ESCALATION_MINUTES = 60;
 const COOLDOWN_MINUTES = 60;
 
+// Follow-up rule (must match SQL trigger mg_set_contacted_at):
+//   call, whatsapp, email, follow_up  -> always count
+//   note                              -> ONLY if note starts with "[FOLLOW-UP]"
 const FOLLOWUP_ACTIVITY_TYPES = ["call", "whatsapp", "email", "note", "follow_up"];
+const FOLLOWUP_NOTE_PREFIX = "[FOLLOW-UP]";
 
 function isWithinBusinessHours(date: Date): boolean {
   const day = date.getDay();
@@ -86,13 +90,21 @@ async function hasFollowUp(
 ): Promise<boolean> {
   const { data: activities } = await supabase
     .from("mg_activity_log")
-    .select("id")
+    .select("id, type, note")
     .eq("lead_id", leadId)
     .in("type", FOLLOWUP_ACTIVITY_TYPES)
-    .gt("created_at", createdAt)
-    .limit(1);
+    .gt("created_at", createdAt);
 
-  if (activities && activities.length > 0) {
+  const realFollowUp = (activities ?? []).find((a) => {
+    const type = (a as { type: string }).type;
+    if (type === "note") {
+      const note = ((a as { note: string | null }).note ?? "").trim();
+      return note.toUpperCase().startsWith(FOLLOWUP_NOTE_PREFIX);
+    }
+    return type === "call" || type === "whatsapp" || type === "email" || type === "follow_up";
+  });
+
+  if (realFollowUp) {
     console.log(`[Escalation] Lead ${leadId}: follow-up found in mg_activity_log, skipping`);
     return true;
   }
