@@ -22,7 +22,7 @@ const OPERATIONAL_MINUTES = 30;
 const ESCALATION_MINUTES = 60;
 const COOLDOWN_MINUTES = 60;
 
-const FOLLOWUP_ACTIVITY_TYPES = ["call", "sms", "whatsapp", "note"];
+const FOLLOWUP_ACTIVITY_TYPES = ["call", "whatsapp", "email", "note", "follow_up"];
 
 function isWithinBusinessHours(date: Date): boolean {
   const day = date.getDay();
